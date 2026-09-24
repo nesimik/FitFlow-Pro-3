@@ -1,0 +1,38 @@
+FitFlow 2.3 — AI Studio güncelleme listesi
+
+ADIM 1 — ÖNCE YENİ DOSYALAR (6 dosya). Her biri için AI Studio'da yeni dosya oluştur, içeriği yapıştır:
+
+[ ] app/src/main/java/com/example/core/Progression.kt
+[ ] app/src/main/java/com/example/core/Recovery.kt
+[ ] app/src/main/java/com/example/core/MuscleSearch.kt
+[ ] app/src/main/java/com/example/ui/RestNotifier.kt
+[ ] app/src/main/java/com/example/ui/components/MuscleColors.kt
+[ ] app/src/main/res/drawable/ic_stat_rest.xml
+
+ADIM 2 — DEĞİŞEN DOSYALAR (21 dosya). Her birini Code sekmesinde aç, tamamını seç (Ctrl+A), sil, yenisini yapıştır:
+
+[ ] app/build.gradle.kts
+[ ] app/src/main/AndroidManifest.xml
+[ ] app/src/main/java/com/example/MainActivity.kt
+[ ] app/src/main/java/com/example/core/DeloadAdvisor.kt
+[ ] app/src/main/java/com/example/core/MuscleMap.kt
+[ ] app/src/main/java/com/example/core/ProgressAnalytics.kt
+[ ] app/src/main/java/com/example/data/Entities.kt
+[ ] app/src/main/java/com/example/data/ExerciseSeed.kt
+[ ] app/src/main/java/com/example/data/FitDatabase.kt
+[ ] app/src/main/java/com/example/data/FitRepository.kt
+[ ] app/src/main/java/com/example/data/SettingsStore.kt
+[ ] app/src/main/java/com/example/ui/AppViewModel.kt
+[ ] app/src/main/java/com/example/ui/FitFlowApp.kt
+[ ] app/src/main/java/com/example/ui/components/BodyData.kt
+[ ] app/src/main/java/com/example/ui/components/BodyMap.kt
+[ ] app/src/main/java/com/example/ui/screens/ActiveWorkoutScreen.kt
+[ ] app/src/main/java/com/example/ui/screens/HomeScreen.kt
+[ ] app/src/main/java/com/example/ui/screens/LibraryScreen.kt
+[ ] app/src/main/java/com/example/ui/screens/ProfileScreen.kt
+[ ] app/src/main/java/com/example/ui/screens/RoutinesScreen.kt
+[ ] app/src/main/java/com/example/ui/screens/StatsScreen.kt
+
+ADIM 3 — Hepsi bitince derle. Hata çıkarsa tüm hata mesajlarını Claude'a yapıştır.
+
+Not: Dosyaların hepsi değişmeden gelmeden derleme hata verebilir; bu normal. Son dosyayı da yapıştırdıktan sonra derle.
