@@ -17,6 +17,12 @@ import com.example.core.Calc
 import com.example.core.DashboardStats
 import com.example.core.DeloadAdvisor
 import com.example.core.LiftStandard
+import com.example.core.LoadKind
+import com.example.core.LoggedSet
+import com.example.core.Prescription
+import com.example.core.ProgressionEngine
+import com.example.core.SessionLog
+import com.example.core.loadKindOf
 import com.example.core.MuscleLoad
 import com.example.core.ProgressAnalytics
 import com.example.core.RepRangeSlice
@@ -62,10 +68,12 @@ data class RestTimerState(
     val running: Boolean = false,
     val finished: Boolean = false,
     val label: String = "",
-    val exerciseId: Long? = null
+    val exerciseId: Long? = null,
+    /** Çalışırken bitiş anı (epoch ms); duraklatılmışken 0. */
+    val endAt: Long = 0L
 ) {
     val progress: Float get() = if (total <= 0) 0f else 1f - remaining.toFloat() / total
-    val active: Boolean get() = running || finished
+    val active: Boolean get() = running || finished || remaining > 0
 }
 
 data class DurationTimerState(
@@ -81,6 +89,18 @@ data class DurationTimerState(
 }
 
 data class PrCelebration(val prs: List<PrEntity>, val workoutTitle: String)
+
+/** Seans bitişinde gösterilen özet: önceki seansa göre hacim ve bir sonraki seansın reçeteleri. */
+data class SessionReview(
+    val volume: Float,
+    val previousVolume: Float,
+    val next: List<Pair<String, Prescription>>
+) {
+    /** Önceki seansa göre hacim değişimi (%), karşılaştırma yoksa null. */
+    val volumeDeltaPct: Int? get() =
+        if (previousVolume <= 0f || volume <= 0f) null
+        else Math.round((volume - previousVolume) / previousVolume * 100f)
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -258,7 +278,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         val ex = libMap[exId]
                         // SADECE ve SADECE bu güne (currentRoutineDayId) ait tamamlanmış seanslardaki setleri al.
                         // Bir hareket başka günlerde de olsa, o günlerdeki set ve ağırlıklar ASLA önceki olarak gelmez!
-                        val prevSets = history
+                        val pastSets = history
                             .filter { s ->
                                 s.exerciseId == exId &&
                                 s.workoutId != workout.id &&
@@ -269,6 +289,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                     workoutMap[s.workoutId]?.isFinished == true
                                 })
                             }
+                        val prevSets = pastSets
                             .groupBy { it.workoutId }
                             .maxByOrNull { entry -> entry.value.maxOf { it.performedAt } }
                             ?.value
@@ -280,6 +301,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             ?: emptyList()
                         val item = dayItems.find { it.orderIndex == order } ?: dayItems.getOrNull(order)
                         val sGroup = sets.firstOrNull()?.supersetGroup?.takeIf { it > 0 } ?: item?.supersetGroup ?: 0
+                        val tracking = ex?.trackingType ?: ExerciseEntity.TRACK_WEIGHT_REPS
+                        val exIsWarmup = sets.firstOrNull()?.isWarmup ?: (item?.isWarmup == true)
+                        val rxHistory = pastSets
+                            .filter { !it.isWarmup && it.reps > 0 }
+                            .groupBy { it.workoutId }
+                            .map { (wid, ws) ->
+                                SessionLog(
+                                    workoutMap[wid]?.startedAt ?: ws.first().performedAt,
+                                    ws.sortedBy { it.setNumber }.map { LoggedSet(it.weightKg, it.reps, it.rpe) }
+                                )
+                            }
+                            .sortedByDescending { it.dateMillis }
+                            .take(8)
+                        val prescription = if (tracking == ExerciseEntity.TRACK_DURATION || exIsWarmup) null
+                        else ProgressionEngine.prescribe(
+                            history = rxHistory,
+                            targetSets = run {
+                                val rows = sets.count { !it.isWarmup }
+                                if (workout.isDeload) (item?.targetSets ?: rows).coerceAtLeast(1)
+                                else maxOf(item?.targetSets ?: 0, rows).coerceAtLeast(1)
+                            },
+                            repMin = item?.repMin ?: 8,
+                            repMax = item?.repMax ?: 12,
+                            kind = if (tracking == ExerciseEntity.TRACK_REPS) LoadKind.BODYWEIGHT
+                                   else loadKindOf(ex?.equipment ?: ""),
+                            profile = settings.loadingProfile(),
+                            deload = workout.isDeload
+                        )
                         SessionExercise(
                             exerciseId = exId,
                             name = sets.first().exerciseName,
@@ -294,7 +343,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             sets = sets.sortedBy { it.setNumber },
                             previous = prevSets,
                             videoUrl = ex?.videoUrl ?: "",
-                            isWarmup = sets.firstOrNull()?.isWarmup ?: (item?.isWarmup == true)
+                            isWarmup = exIsWarmup,
+                            equipment = ex?.equipment ?: "",
+                            prescription = prescription,
+                            history = rxHistory
                         )
                     }
                     .sortedBy { it.order }
@@ -365,7 +417,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 dayId = day?.id,
                 title = workoutTitle,
                 routineName = routine?.name ?: "",
-                isDeload = shouldDeload
+                isDeload = shouldDeload,
+                profile = settings.loadingProfile()
             )
             _elapsed.value = 0
             onStarted(id)
@@ -598,40 +651,67 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /* --------------------------- Dinlenme sayacı ---------------------------- */
+    // Sayaç bitiş zamanına (endAt) göre çalışır: her döngüde kalan süre gerçek saatten
+    // hesaplanır, bu yüzden uygulama arka plana düşse de sapma birikmez. Aynı bitiş
+    // zamanı sistem bildirimine verilir; kilit ekranında da doğru geri sayım görünür.
+
+    private val restNotifier = RestNotifier(app)
 
     fun startRest(seconds: Int, label: String, exerciseId: Long? = null) {
+        if (seconds <= 0) { stopRest(); return }
         restJob?.cancel()
         stopAlarm()
-        _restTimer.value = RestTimerState(total = seconds, remaining = seconds, running = true, label = label, exerciseId = exerciseId)
+        val endAt = System.currentTimeMillis() + seconds * 1000L
+        _restTimer.value = RestTimerState(
+            total = seconds, remaining = seconds, running = true,
+            label = label, exerciseId = exerciseId, endAt = endAt
+        )
+        restNotifier.showCountdown(endAt, label)
+        runRestLoop()
+    }
+
+    private fun runRestLoop() {
+        restJob?.cancel()
         restJob = viewModelScope.launch {
-            while (_restTimer.value.remaining > 0 && _restTimer.value.running) {
-                delay(1000)
+            var lastBeep = -1
+            while (true) {
                 val s = _restTimer.value
                 if (!s.running) return@launch
-                val next = s.remaining - 1
-                _restTimer.value = s.copy(remaining = next)
-                if (next in 1..3 && settings.countdownBeep.value && settings.sound.value) shortBeep()
+                val left = (((s.endAt - System.currentTimeMillis()) + 999L) / 1000L).toInt().coerceAtLeast(0)
+                if (left != s.remaining) _restTimer.value = s.copy(remaining = left)
+                if (left in 1..3 && left != lastBeep && settings.countdownBeep.value && settings.sound.value) {
+                    lastBeep = left
+                    shortBeep()
+                }
+                if (left <= 0) break
+                delay(200)
             }
-            if (_restTimer.value.running) {
-                _restTimer.value = _restTimer.value.copy(running = false, finished = true, remaining = 0)
-                if (settings.sound.value) playAlarm()
-                if (settings.vibrate.value) vibrate(600)
-            }
+            val done = _restTimer.value
+            _restTimer.value = done.copy(running = false, finished = true, remaining = 0, endAt = 0L)
+            restNotifier.showFinished(done.label)
+            if (settings.sound.value) playAlarm()
+            if (settings.vibrate.value) vibrate(600)
         }
     }
 
     fun adjustRest(delta: Int) {
         val s = _restTimer.value
         if (!s.active) return
-        val next = (s.remaining + delta).coerceAtLeast(0)
-        if (next == 0) { stopRest(); return }
-        _restTimer.value = s.copy(
-            remaining = next,
-            total = maxOf(s.total, next),
-            finished = false,
-            running = true
-        )
-        if (!s.running) startRest(next, s.label, s.exerciseId)
+        when {
+            s.finished -> if (delta > 0) startRest(delta, s.label, s.exerciseId)
+            s.running -> {
+                val newEnd = s.endAt + delta * 1000L
+                val left = (((newEnd - System.currentTimeMillis()) + 999L) / 1000L).toInt()
+                if (left <= 0) { stopRest(); return }
+                _restTimer.value = s.copy(endAt = newEnd, remaining = left, total = maxOf(s.total, left))
+                restNotifier.showCountdown(newEnd, s.label)
+            }
+            else -> { // duraklatılmış
+                val left = s.remaining + delta
+                if (left <= 0) { stopRest(); return }
+                _restTimer.value = s.copy(remaining = left, total = maxOf(s.total, left))
+            }
+        }
     }
 
     fun pauseResumeRest() {
@@ -639,32 +719,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (s.finished) { stopRest(); return }
         if (s.running) {
             restJob?.cancel()
-            _restTimer.value = s.copy(running = false)
+            val left = (((s.endAt - System.currentTimeMillis()) + 999L) / 1000L).toInt().coerceAtLeast(0)
+            _restTimer.value = s.copy(running = false, remaining = left, endAt = 0L)
+            restNotifier.cancel()
         } else if (s.remaining > 0) {
-            val remaining = s.remaining
-            val total = s.total
-            restJob?.cancel()
-            _restTimer.value = s.copy(running = true)
-            restJob = viewModelScope.launch {
-                var r = remaining
-                while (r > 0 && _restTimer.value.running) {
-                    delay(1000)
-                    if (!_restTimer.value.running) return@launch
-                    r = _restTimer.value.remaining - 1
-                    _restTimer.value = _restTimer.value.copy(remaining = r, total = total)
-                }
-                if (_restTimer.value.running) {
-                    _restTimer.value = _restTimer.value.copy(running = false, finished = true, remaining = 0)
-                    if (settings.sound.value) playAlarm()
-                    if (settings.vibrate.value) vibrate(600)
-                }
-            }
+            val endAt = System.currentTimeMillis() + s.remaining * 1000L
+            _restTimer.value = s.copy(running = true, endAt = endAt)
+            restNotifier.showCountdown(endAt, s.label)
+            runRestLoop()
         }
     }
 
     fun stopRest() {
         restJob?.cancel()
         stopAlarm()
+        restNotifier.cancel()
         _restTimer.value = RestTimerState()
     }
 
@@ -901,6 +970,73 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /* ------------------------------ Öneri motoru ----------------------------- */
 
+    /**
+     * Bir program gününün, seans başlamadan önceki reçetesi (ana ekrandaki "Bugünün hedefleri").
+     * Seans başlatıldığında FitRepository.startWorkout aynı mantıkla setleri doldurur.
+     */
+    fun planFor(dayId: Long): List<Pair<String, Prescription>> {
+        val items = allItems.value.filter { it.dayId == dayId }.sortedBy { it.orderIndex }
+        val dayWorkouts = workouts.value.filter { it.isFinished && it.routineDayId == dayId }.associateBy { it.id }
+        val lib = exercises.value.associateBy { it.id }
+        val profile = settings.loadingProfile()
+        val deload = deloadRecommendation.value.isCurrentlyDeloadWeek
+        val sets = allSets.value
+        return items.mapNotNull { item ->
+            val ex = lib[item.exerciseId] ?: return@mapNotNull null
+            if (item.isWarmup || ex.trackingType == ExerciseEntity.TRACK_DURATION) return@mapNotNull null
+            val sessions = sets
+                .filter { it.exerciseId == item.exerciseId && it.isCompleted && !it.isWarmup && it.reps > 0 && it.workoutId in dayWorkouts }
+                .groupBy { it.workoutId }
+                .map { (wid, ws) ->
+                    SessionLog(
+                        dayWorkouts[wid]?.startedAt ?: ws.first().performedAt,
+                        ws.sortedBy { it.setNumber }.map { LoggedSet(it.weightKg, it.reps, it.rpe) }
+                    )
+                }
+                .sortedByDescending { it.dateMillis }
+                .take(8)
+            val name = item.customName.ifBlank { ex.name }
+            name to ProgressionEngine.prescribe(
+                history = sessions,
+                targetSets = maxOf(item.targetSets, sessions.firstOrNull()?.sets?.size ?: 0),
+                repMin = item.repMin,
+                repMax = item.repMax,
+                kind = if (ex.trackingType == ExerciseEntity.TRACK_REPS) LoadKind.BODYWEIGHT else loadKindOf(ex.equipment),
+                profile = profile,
+                deload = deload
+            )
+        }
+    }
+
+    /**
+     * Devam eden seansın özetini ve bu seansın sonuçlarına göre BİR SONRAKİ seansın
+     * reçetelerini üretir. Bitirme ekranında "gelecek hafta ne yapacağım" sorusunu yanıtlar.
+     */
+    fun sessionReview(): SessionReview {
+        val list = sessionExercises.value
+        val profile = settings.loadingProfile()
+        var volume = 0f
+        var prevVolume = 0f
+        val next = mutableListOf<Pair<String, Prescription>>()
+        list.forEach { se ->
+            val working = se.sets.filter { it.isCompleted && !it.isWarmup && it.reps > 0 }
+            volume += working.sumOf { (it.weightKg * it.reps).toDouble() }.toFloat()
+            prevVolume += se.previous.filter { !it.isWarmup }.sumOf { (it.weightKg * it.reps).toDouble() }.toFloat()
+            if (se.prescription == null || working.isEmpty()) return@forEach
+            val today = SessionLog(System.currentTimeMillis(), working.map { LoggedSet(it.weightKg, it.reps, it.rpe) })
+            val rx = ProgressionEngine.prescribe(
+                history = listOf(today) + se.history,
+                targetSets = working.size,
+                repMin = se.targetRepMin,
+                repMax = se.targetRepMax,
+                kind = if (se.trackingType == ExerciseEntity.TRACK_REPS) LoadKind.BODYWEIGHT else loadKindOf(se.equipment),
+                profile = profile
+            )
+            next += se.name to rx
+        }
+        return SessionReview(volume, prevVolume, next)
+    }
+
     /** Bir hareket için bir sonraki seans önerisi. */
     fun suggestionFor(se: SessionExercise): String {
         val prev = se.previous.filter { !it.isWarmup }
@@ -918,5 +1054,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
         restJob?.cancel()
         stopAlarm()
+        restNotifier.cancel()
     }
 }

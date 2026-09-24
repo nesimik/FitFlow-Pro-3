@@ -24,7 +24,9 @@ object DeloadAdvisor {
         val reasonTitle: String,
         val reasonDetails: List<String>,
         val adviceList: List<String>,
-        val isCurrentlyDeloadWeek: Boolean
+        val isCurrentlyDeloadWeek: Boolean,
+        /** Öneri takvim yerine gerçek performans düşüşünden mi geliyor? */
+        val performanceTriggered: Boolean = false
     )
 
     fun analyze(
@@ -63,7 +65,31 @@ object DeloadAdvisor {
         val (strainScore, strainLevel, reasonTitle, details, recommendedWeek) =
             evaluateStrain(currentCycleWeek, cycleWorkouts, cycleSets, now)
 
-        val shouldDeloadNow = isExplicitDeloadActive || (currentCycleWeek >= recommendedWeek)
+        // Performansa dayalı sinyal: gerileyen / platoya giren ana hareketler ve RPE birikimi.
+        // Takvim tek başına deload tetiklemez; yalnızca uzun süre (öneri + 2 hafta) sinyal
+        // gelmezse güvenlik amaçlı devreye girer.
+        val histories = cycleSets
+            .filter { it.isCompleted && !it.isWarmup && it.reps > 0 }
+            .groupBy { it.exerciseName }
+            .mapValues { (_, sets) ->
+                sets.groupBy { it.workoutId }.values.map { ws ->
+                    SessionLog(ws.first().performedAt, ws.map { LoggedSet(it.weightKg, it.reps, it.rpe) })
+                }
+            }
+        val recentRpes = cycleSets
+            .filter { it.isCompleted && !it.isWarmup && it.rpe > 0f && it.performedAt >= now - 14 * 86_400_000L }
+            .map { it.rpe }
+        val signal = ReadinessEngine.evaluate(histories, recentRpes)
+        val performanceTriggered = signal.deloadSuggested && currentCycleWeek >= 4 && !isExplicitDeloadActive
+        val safetyCap = currentCycleWeek >= recommendedWeek + 2
+
+        val shouldDeloadNow = isExplicitDeloadActive || performanceTriggered || safetyCap
+        val finalTitle = when {
+            performanceTriggered -> "Performans verilerin toparlanma ihtiyacını gösteriyor — bu hafta deload önerilir."
+            safetyCap -> "Uzun süredir kesintisiz yüklenmedesin; güvenlik amaçlı deload önerilir."
+            else -> reasonTitle
+        }
+        val finalDetails = if (performanceTriggered) signal.reasons + details else details
 
         return DeloadRecommendation(
             shouldDeloadNow = shouldDeloadNow,
@@ -71,14 +97,15 @@ object DeloadAdvisor {
             recommendedWeek = recommendedWeek,
             strainScore = strainScore,
             strainLevel = strainLevel,
-            reasonTitle = reasonTitle,
-            reasonDetails = details,
+            reasonTitle = finalTitle,
+            reasonDetails = finalDetails,
             adviceList = listOf(
                 ADVICE_KEEP_OR_REDUCE_WEIGHT,
                 ADVICE_HALVE_SETS,
                 ADVICE_REPS_8_10
             ),
-            isCurrentlyDeloadWeek = isExplicitDeloadActive
+            isCurrentlyDeloadWeek = isExplicitDeloadActive,
+            performanceTriggered = performanceTriggered
         )
     }
 

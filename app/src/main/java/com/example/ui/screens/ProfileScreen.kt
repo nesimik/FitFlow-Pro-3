@@ -379,6 +379,8 @@ fun SettingsScreen(vm: AppViewModel, nav: NavHostController) {
     val keepOn by s.keepScreenOn.collectAsStateWithLifecycle()
     val bar by s.barWeight.collectAsStateWithLifecycle()
     val inc by s.increment.collectAsStateWithLifecycle()
+    val dbStep by s.dumbbellStep.collectAsStateWithLifecycle()
+    val machineStep by s.machineStep.collectAsStateWithLifecycle()
     val lock by s.lockEnabled.collectAsStateWithLifecycle()
     val pass by s.passcode.collectAsStateWithLifecycle()
 
@@ -514,12 +516,37 @@ fun SettingsScreen(vm: AppViewModel, nav: NavHostController) {
                         }
                     }
                     Spacer(Modifier.height(14.dp))
-                    Text("Ağırlık artış adımı", style = MaterialTheme.typography.titleSmall)
+                    Text("Barbell artış adımı (toplam)", style = MaterialTheme.typography.titleSmall)
                     Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(1f, 1.25f, 2.5f, 5f).forEach { v ->
                             ChoiceChip("${v.trimNum()} kg", inc == v, { s.setIncrement(v) })
                         }
                     }
+                    Spacer(Modifier.height(14.dp))
+                    Text("Dambıl artış adımı (tek dambıl)", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Ayarlanabilir dambılda en küçük plaka çiftinin toplamı (ör. 2 × 1 kg = 2 kg).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.fit.muted
+                    )
+                    Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(1f, 2f, 2.5f, 5f).forEach { v ->
+                            ChoiceChip("${v.trimNum()} kg", dbStep == v, { s.setDumbbellStep(v) })
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Text("Makine / kablo kademesi", style = MaterialTheme.typography.titleSmall)
+                    Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(2.5f, 5f, 7.5f, 10f).forEach { v ->
+                            ChoiceChip("${v.trimNum()} kg", machineStep == v, { s.setMachineStep(v) })
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Progresyon motoru ağırlık artırırken bu adımları kullanır; böylece öneri her zaman salonda gerçekten kurabileceğin bir ağırlık olur.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.fit.muted
+                    )
                 }
             }
 

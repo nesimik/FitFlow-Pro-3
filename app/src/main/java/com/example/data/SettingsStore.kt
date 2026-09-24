@@ -104,6 +104,24 @@ class SettingsStore(context: Context) {
     val increment: StateFlow<Float> = _increment.asStateFlow()
     fun setIncrement(v: Float) { _increment.value = v; prefs.edit().putFloat(K_INCREMENT, v).apply() }
 
+    /** Ayarlanabilir dambıl: bir dambıl için en küçük artış (ör. 2 × 0.5 kg plaka = 1 kg, 2 × 1 kg = 2 kg). */
+    private val _dumbbellStep = flow(prefs.getFloat(K_DB_STEP, 2f))
+    val dumbbellStep: StateFlow<Float> = _dumbbellStep.asStateFlow()
+    fun setDumbbellStep(v: Float) { _dumbbellStep.value = v; prefs.edit().putFloat(K_DB_STEP, v).apply() }
+
+    /** Makine / kablo ağırlık yığınındaki bir kademe. */
+    private val _machineStep = flow(prefs.getFloat(K_MACHINE_STEP, 5f))
+    val machineStep: StateFlow<Float> = _machineStep.asStateFlow()
+    fun setMachineStep(v: Float) { _machineStep.value = v; prefs.edit().putFloat(K_MACHINE_STEP, v).apply() }
+
+    /** Progresyon motorunun kullandığı güncel ekipman profili. */
+    fun loadingProfile(): com.example.core.LoadingProfile = com.example.core.LoadingProfile(
+        barKg = _barWeight.value,
+        barbellStep = _increment.value,
+        dumbbellStep = _dumbbellStep.value,
+        machineStep = _machineStep.value
+    )
+
     /* -------------------------------- Kilit ---------------------------------- */
     private val _lockEnabled = flow(prefs.getBoolean(K_LOCK, false))
     val lockEnabled: StateFlow<Boolean> = _lockEnabled.asStateFlow()
@@ -147,6 +165,7 @@ class SettingsStore(context: Context) {
         const val K_SOUND = "sound"; const val K_VIBRATE = "vibrate"; const val K_ALARM = "alarm"
         const val K_BEEP = "beep"; const val K_SCREEN_ON = "screen_on"
         const val K_BAR = "bar"; const val K_INCREMENT = "increment"
+        const val K_DB_STEP = "db_step"; const val K_MACHINE_STEP = "machine_step"
         const val K_LOCK = "lock"; const val K_PASS = "pass"; const val K_ONBOARD = "onboard"
         const val K_DELOAD_WEEK_START = "deload_week_start"; const val K_PRE_DELOAD_BACKUP = "pre_deload_backup"
     }

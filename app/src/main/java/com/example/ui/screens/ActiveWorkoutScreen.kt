@@ -1,10 +1,10 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,59 +23,74 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.LinkOff
-import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.TrendingDown
+import androidx.compose.material.icons.filled.TrendingFlat
+import androidx.compose.material.icons.filled.TrendingUp
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
+import com.example.core.Calc
+import com.example.core.LoadKind
+import com.example.core.LoadingProfile
+import com.example.core.Prescription
+import com.example.core.ProgressAction
 import com.example.core.formatDuration
 import com.example.core.formatTonnage
+import com.example.core.loadKindOf
 import com.example.core.trimNum
 import com.example.data.ExerciseEntity
 import com.example.data.SessionExercise
 import com.example.data.WorkoutSetEntity
 import com.example.ui.AppViewModel
+import com.example.ui.SessionReview
 import com.example.ui.components.AccentButton
 import com.example.ui.components.Badge
 import com.example.ui.components.CheckCircle
@@ -84,14 +99,30 @@ import com.example.ui.components.FitCard
 import com.example.ui.components.FitTextField
 import com.example.ui.components.GhostButton
 import com.example.ui.components.RoundIconButton
+import com.example.ui.components.ThinProgress
 import com.example.ui.theme.Palette
 import com.example.ui.theme.fit
+import kotlinx.coroutines.delay
+
+/* ==========================================================================
+ * Aktif seans ekranı
+ *
+ * Tasarım ilkeleri:
+ *  - Seans, progresyon motorunun reçetesiyle hazır açılır: bir seti kaydetmek = ✓'e tek dokunuş.
+ *  - Değer değiştirmek gerekirse set satırına dokun → büyük +/- butonlu editör (terli elle, tek elle).
+ *  - Sıradaki set vurgulanır; gereksiz rozet ve ikonlar ana akıştan çıkarıldı (hepsi ⋮ menüsünde).
+ * ========================================================================== */
 
 @Composable
 fun ActiveWorkoutScreen(vm: AppViewModel, nav: NavHostController) {
     val workout by vm.activeWorkout.collectAsStateWithLifecycle()
     val exercises by vm.sessionExercises.collectAsStateWithLifecycle()
     val elapsed by vm.elapsedSeconds.collectAsStateWithLifecycle()
+    val bar by vm.settings.barWeight.collectAsStateWithLifecycle()
+    val barStep by vm.settings.increment.collectAsStateWithLifecycle()
+    val dbStep by vm.settings.dumbbellStep.collectAsStateWithLifecycle()
+    val machineStep by vm.settings.machineStep.collectAsStateWithLifecycle()
+    val profile = remember(bar, barStep, dbStep, machineStep) { LoadingProfile(bar, barStep, dbStep, machineStep) }
     val context = LocalContext.current
 
     var showPicker by remember { mutableStateOf(false) }
@@ -100,6 +131,8 @@ fun ActiveWorkoutScreen(vm: AppViewModel, nav: NavHostController) {
     var showFinish by remember { mutableStateOf(false) }
     var showDiscard by remember { mutableStateOf(false) }
     var showTips by remember { mutableStateOf<SessionExercise?>(null) }
+    /** Düzenlenen set: (hareket sırası, set id). Güncel veri her seferinde listeden okunur. */
+    var editing by remember { mutableStateOf<Pair<Int, Long>?>(null) }
 
     val listState = rememberLazyListState()
     var highlightedId by remember { mutableStateOf<Long?>(null) }
@@ -130,10 +163,13 @@ fun ActiveWorkoutScreen(vm: AppViewModel, nav: NavHostController) {
     val totalSets = exercises.sumOf { it.totalSets }
     val doneSets = exercises.sumOf { it.completedSets }
     val volume = exercises.sumOf { it.volume.toDouble() }.toFloat()
+    // Sıradaki set: ilk tamamlanmamış set (üstten aşağı).
+    val nextSetId = exercises.asSequence().flatMap { it.sets.asSequence() }.firstOrNull { !it.isCompleted }?.id
 
     Column(Modifier.fillMaxSize()) {
         SessionTopBar(
             title = workout!!.title,
+            isDeload = workout!!.isDeload,
             elapsed = elapsed,
             volume = volume,
             done = doneSets,
@@ -149,13 +185,15 @@ fun ActiveWorkoutScreen(vm: AppViewModel, nav: NavHostController) {
                 .weight(1f)
                 .navigationBarsPadding()
                 .imePadding(),
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 320.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 200.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(exercises, key = { "${it.exerciseId}_${it.order}" }) { se ->
                 ExerciseLogCard(
                     se = se,
-                    suggestion = vm.suggestionFor(se),
+                    profile = profile,
+                    nextSetId = nextSetId,
+                    fallbackSuggestion = if (se.prescription == null) vm.suggestionFor(se) else "",
                     isHighlighted = highlightedId == se.exerciseId,
                     onToggleSet = { set ->
                         if (se.trackingType == ExerciseEntity.TRACK_DURATION) {
@@ -164,6 +202,7 @@ fun ActiveWorkoutScreen(vm: AppViewModel, nav: NavHostController) {
                             vm.toggleSetDone(set, se.restSeconds)
                         }
                     },
+                    onEditSet = { set -> editing = se.order to set.id },
                     onUpdateSet = vm::updateSet,
                     onDeleteSet = vm::deleteSet,
                     onAddSet = { vm.addSetRow(se.order, se.exerciseId) },
@@ -173,7 +212,6 @@ fun ActiveWorkoutScreen(vm: AppViewModel, nav: NavHostController) {
                     onSeparateSuperset = { vm.setSessionExerciseSuperset(se.order, 0) },
                     onDissolveSuperset = { group -> vm.dissolveSessionSuperset(group) },
                     onStartRest = { vm.startRest(se.restSeconds, se.name, se.exerciseId) },
-                    onOpenVideo = { openUrl(context, se.videoUrl) },
                     onShowTips = { showTips = se },
                     onRenameExercise = { newName ->
                         if (newName.isNotBlank()) {
@@ -213,6 +251,31 @@ fun ActiveWorkoutScreen(vm: AppViewModel, nav: NavHostController) {
                     )
                 }
             }
+        }
+    }
+
+    /* ------------------------------ Set editörü ------------------------------ */
+    editing?.let { (order, setId) ->
+        val se = exercises.firstOrNull { it.order == order }
+        val set = se?.sets?.firstOrNull { it.id == setId }
+        if (se == null || set == null) {
+            LaunchedEffect(order, setId) { editing = null }
+        } else {
+            SetEditorSheet(
+                se = se,
+                set = set,
+                profile = profile,
+                onDismiss = { editing = null },
+                onSave = { updated -> vm.updateSet(updated); editing = null },
+                onSaveAndComplete = { updated ->
+                    if (updated.isCompleted) vm.updateSet(updated)
+                    else if (se.trackingType == ExerciseEntity.TRACK_DURATION) {
+                        vm.updateSet(updated)
+                        vm.toggleTimedSetDone(updated, updated.durationSeconds, se.restSeconds)
+                    } else vm.toggleSetDone(updated, se.restSeconds)
+                    editing = null
+                }
+            )
         }
     }
 
@@ -272,10 +335,12 @@ fun ActiveWorkoutScreen(vm: AppViewModel, nav: NavHostController) {
     }
 
     if (showFinish) {
+        val review = remember(exercises) { vm.sessionReview() }
         FinishDialog(
             doneSets = doneSets,
-            volume = volume,
+            totalSets = totalSets,
             elapsed = elapsed,
+            review = review,
             onDismiss = { showFinish = false },
             onFinish = { notes, feeling ->
                 showFinish = false
@@ -293,7 +358,7 @@ fun ActiveWorkoutScreen(vm: AppViewModel, nav: NavHostController) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        vm.suggestionFor(se),
+                        se.prescription?.let { "${it.headline} · ${it.reason}" } ?: vm.suggestionFor(se),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.fit.accent
                     )
@@ -331,6 +396,7 @@ fun ActiveWorkoutScreen(vm: AppViewModel, nav: NavHostController) {
 @Composable
 private fun SessionTopBar(
     title: String,
+    isDeload: Boolean,
     elapsed: Int,
     volume: Float,
     done: Int,
@@ -341,19 +407,33 @@ private fun SessionTopBar(
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 3.dp) {
-        Column(Modifier.statusBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp)) {
+        Column(Modifier.statusBarsPadding().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                RoundIconButton(Icons.Default.Close, MaterialTheme.fit.muted, 38.dp, MaterialTheme.fit.elevated) { onDiscard() }
+                RoundIconButton(Icons.Default.Close, MaterialTheme.fit.muted, 40.dp, MaterialTheme.fit.elevated) { onMinimize() }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(formatDuration(elapsed), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.fit.accent)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            title,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.fit.muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (isDeload) Badge("Deload", Palette.violet)
+                    }
+                    Text(
+                        formatDuration(elapsed),
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                 }
                 Box {
-                    RoundIconButton(Icons.Default.MoreVert, MaterialTheme.fit.muted, 38.dp, MaterialTheme.fit.elevated) { menu = true }
+                    RoundIconButton(Icons.Default.MoreVert, MaterialTheme.fit.muted, 40.dp, MaterialTheme.fit.elevated) { menu = true }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(
-                            text = { Text("Seansı sil") },
+                            text = { Text("Kaydetmeden sil") },
                             onClick = { menu = false; onDiscard() },
                             leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.fit.danger) }
                         )
@@ -361,22 +441,39 @@ private fun SessionTopBar(
                 }
                 Spacer(Modifier.width(8.dp))
                 Surface(
-                    shape = RoundedCornerShape(13.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = MaterialTheme.fit.success,
                     modifier = Modifier.clickable { onFinish() }
                 ) {
-                    Text(
-                        "Kaydet",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp)
-                    )
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        Text("Bitir", style = MaterialTheme.typography.titleSmall, color = Color.White)
+                    }
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Badge("$done / $total set", MaterialTheme.fit.accent)
-                Badge(formatTonnage(volume), MaterialTheme.fit.gold)
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "$done / $total set",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.fit.accent
+                )
+                Spacer(Modifier.width(10.dp))
+                ThinProgress(
+                    progress = if (total == 0) 0f else done.toFloat() / total,
+                    modifier = Modifier.weight(1f),
+                    height = 6.dp
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    formatTonnage(volume),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.fit.muted
+                )
             }
         }
     }
@@ -387,9 +484,12 @@ private fun SessionTopBar(
 @Composable
 private fun ExerciseLogCard(
     se: SessionExercise,
-    suggestion: String,
+    profile: LoadingProfile,
+    nextSetId: Long?,
+    fallbackSuggestion: String,
     isHighlighted: Boolean = false,
     onToggleSet: (WorkoutSetEntity) -> Unit,
+    onEditSet: (WorkoutSetEntity) -> Unit,
     onUpdateSet: (WorkoutSetEntity) -> Unit,
     onDeleteSet: (WorkoutSetEntity) -> Unit,
     onAddSet: () -> Unit,
@@ -399,11 +499,10 @@ private fun ExerciseLogCard(
     onSeparateSuperset: () -> Unit,
     onDissolveSuperset: (Int) -> Unit,
     onStartRest: () -> Unit,
-    onOpenVideo: () -> Unit,
     onShowTips: () -> Unit,
     onRenameExercise: ((String) -> Unit)? = null
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
     var renameText by remember(se.name) { mutableStateOf(se.name) }
@@ -443,58 +542,63 @@ private fun ExerciseLogCard(
     }
 
     FitCard(
-        border = if (isHighlighted) MaterialTheme.fit.accent else if (isInSuperset) Palette.warning.copy(alpha = 0.6f) else MaterialTheme.fit.cardBorder,
-        contentPadding = PaddingValues(14.dp)
+        border = when {
+            isHighlighted -> MaterialTheme.fit.accent
+            se.isDone -> MaterialTheme.fit.success.copy(alpha = 0.5f)
+            isInSuperset -> Palette.warning.copy(alpha = 0.6f)
+            else -> MaterialTheme.fit.cardBorder
+        },
+        contentPadding = PaddingValues(start = 14.dp, end = 10.dp, top = 12.dp, bottom = 8.dp)
     ) {
+        /* Başlık: isim + hedef. Diğer her şey ⋮ menüsünde. */
         Row(verticalAlignment = Alignment.CenterVertically) {
-            MuscleAvatar(se.muscleGroup, 38.dp)
+            MuscleAvatar(se.muscleGroup, 36.dp)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        se.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    if (isInSuperset) {
-                        Badge("⚡ SS ${se.supersetGroup}", Palette.warning)
-                    }
-                    if (se.isWarmup) {
-                        Badge("Isınma", Palette.warning)
-                    } else {
-                        Badge("Ana", MaterialTheme.fit.accent)
-                    }
-                }
                 Text(
-                    "Hedef ${se.targetRepMin}-${se.targetRepMax} tekrar · ${se.restSeconds} sn dinlenme",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.fit.muted
+                    se.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (isInSuperset) Badge("SS ${se.supersetGroup}", Palette.warning)
+                    if (se.isWarmup) Badge("Isınma", Palette.warning)
+                    Text(
+                        if (isDuration) "Dinlenme ${se.restSeconds} sn"
+                        else "${se.targetRepMin}-${se.targetRepMax} tekrar · ${se.restSeconds} sn",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.fit.muted,
+                        maxLines = 1
+                    )
+                }
             }
-            if (se.isDone) Badge("Tamam", MaterialTheme.fit.success)
-            Spacer(Modifier.width(4.dp))
-            IconButton(
-                onClick = {
-                    val targetUrl = if (se.videoUrl.isNotBlank()) se.videoUrl else "https://www.youtube.com/results?search_query=${android.net.Uri.encode("${se.name} egzersizi")}"
-                    openUrl(context, targetUrl)
-                },
-                modifier = Modifier.size(34.dp)
-            ) {
-                Icon(
-                    Icons.Default.PlayCircle,
-                    contentDescription = "YouTube videosunu izle",
-                    tint = Color(0xFFFF0000),
-                    modifier = Modifier.size(24.dp)
-                )
+            if (se.isDone) {
+                Icon(Icons.Default.Check, "Tamamlandı", tint = MaterialTheme.fit.success, modifier = Modifier.size(22.dp))
             }
             Box {
-                RoundIconButton(Icons.Default.MoreVert, MaterialTheme.fit.muted, 34.dp, Color.Transparent) { menu = true }
+                RoundIconButton(Icons.Default.MoreVert, MaterialTheme.fit.muted, 40.dp, Color.Transparent) { menu = true }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Teknik & öneri") },
+                        onClick = { menu = false; onShowTips() },
+                        leadingIcon = { Icon(Icons.Default.Lightbulb, null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Videoyu aç") },
+                        onClick = {
+                            menu = false
+                            val targetUrl = if (se.videoUrl.isNotBlank()) se.videoUrl
+                            else "https://www.youtube.com/results?search_query=${android.net.Uri.encode("${se.name} egzersizi")}"
+                            openUrl(context, targetUrl)
+                        },
+                        leadingIcon = { Icon(Icons.Default.PlayCircle, null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Dinlenmeyi başlat") },
+                        onClick = { menu = false; onStartRest() },
+                        leadingIcon = { Icon(Icons.Default.Timer, null) }
+                    )
                     if (isInSuperset) {
                         DropdownMenuItem(
                             text = { Text("Süpersetten ayır") },
@@ -508,9 +612,9 @@ private fun ExerciseLogCard(
                         )
                     } else {
                         DropdownMenuItem(
-                            text = { Text("⚡ Başka hareketle süperset yap...") },
+                            text = { Text("Başka hareketle süperset yap") },
                             onClick = { menu = false; onRequestCombine() },
-                            leadingIcon = { Icon(Icons.Default.Link, null, tint = MaterialTheme.fit.accent) }
+                            leadingIcon = { Icon(Icons.Default.Link, null) }
                         )
                     }
                     DropdownMenuItem(
@@ -519,28 +623,9 @@ private fun ExerciseLogCard(
                         leadingIcon = { Icon(Icons.Default.Lightbulb, null) }
                     )
                     DropdownMenuItem(
-                        text = { Text("Teknik & öneri") },
-                        onClick = { menu = false; onShowTips() },
-                        leadingIcon = { Icon(Icons.Default.Lightbulb, null) }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Hareketi yeniden adlandır") },
+                        text = { Text("Yeniden adlandır") },
                         onClick = { menu = false; showRenameDialog = true },
                         leadingIcon = { Icon(Icons.Default.Edit, null) }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("YouTube'da Aç / Ara") },
-                        onClick = {
-                            menu = false
-                            val targetUrl = if (se.videoUrl.isNotBlank()) se.videoUrl else "https://www.youtube.com/results?search_query=${android.net.Uri.encode("${se.name} egzersizi")}"
-                            openUrl(context, targetUrl)
-                        },
-                        leadingIcon = { Icon(Icons.Default.PlayCircle, null, tint = Color(0xFFFF0000)) }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Dinlenmeyi başlat") },
-                        onClick = { menu = false; onStartRest() },
-                        leadingIcon = { Icon(Icons.Default.Timer, null) }
                     )
                     DropdownMenuItem(
                         text = { Text("Hareketi çıkar") },
@@ -551,44 +636,58 @@ private fun ExerciseLogCard(
             }
         }
 
-        if (suggestion.isNotBlank()) {
+        /* Bugünün reçetesi */
+        val rx = se.prescription
+        if (rx != null && !se.isDone) {
+            Spacer(Modifier.height(10.dp))
+            PrescriptionPanel(rx)
+        } else if (rx == null && fallbackSuggestion.isNotBlank() && !se.isDone) {
             Spacer(Modifier.height(10.dp))
             Row(
                 Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.fit.accent.copy(alpha = 0.08f))
+                    .background(MaterialTheme.fit.elevated)
                     .padding(10.dp),
-                verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(Icons.Default.Lightbulb, null, tint = MaterialTheme.fit.accent, modifier = Modifier.size(15.dp))
-                Text(suggestion, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.fit.muted)
+                Text(fallbackSuggestion, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.fit.muted)
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        /* Barbell ısınma rampası + plaka dizilimi */
+        val workWeight = se.sets.firstOrNull { !it.isWarmup }?.weightKg ?: 0f
+        if (!se.isWarmup && !isDuration && !se.isDone && loadKindOf(se.equipment) == LoadKind.BARBELL &&
+            workWeight >= profile.barKg + 10f && se.completedSets == 0
+        ) {
+            Spacer(Modifier.height(8.dp))
+            WarmupRamp(workWeight, profile.barKg)
+        }
+
+        Spacer(Modifier.height(10.dp))
 
         // Sütun başlıkları
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            HeaderCell("SET", Modifier.width(34.dp))
-            HeaderCell("ÖNCEKİ", Modifier.weight(1.5f))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 4.dp)) {
+            HeaderCell("SET", Modifier.width(36.dp))
+            HeaderCell("ÖNCEKİ", Modifier.weight(1.3f))
             if (isDuration) {
-                HeaderCell("SÜRE (sn)", Modifier.weight(1.4f))
+                HeaderCell("SÜRE", Modifier.weight(1.6f))
             } else {
-                HeaderCell("KG", Modifier.weight(1f))
+                if (!isRepsOnly) HeaderCell("KG", Modifier.weight(1f))
                 HeaderCell("TEKRAR", Modifier.weight(1f))
             }
             HeaderCell("RPE", Modifier.weight(0.8f))
-            Spacer(Modifier.width(38.dp))
+            Spacer(Modifier.width(48.dp))
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(2.dp))
 
         se.sets.forEach { set ->
             val prevSet = se.previous.firstOrNull { it.setNumber == set.setNumber } ?: se.previous.lastOrNull()
             SetRow(
                 set = set,
                 previous = prevSet,
+                isNext = set.id == nextSetId,
                 isDuration = isDuration,
                 isRepsOnly = isRepsOnly,
                 onToggle = {
@@ -599,24 +698,114 @@ private fun ExerciseLogCard(
                     )
                     onToggleSet(resolved)
                 },
+                onEdit = { onEditSet(set) },
                 onUpdate = onUpdateSet,
                 onDelete = { onDeleteSet(set) }
             )
         }
 
-        Spacer(Modifier.height(8.dp))
         Row(
             Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
                 .clickable { onAddSet() }
-                .padding(vertical = 9.dp),
+                .padding(vertical = 12.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(Icons.Default.Add, null, tint = MaterialTheme.fit.muted, modifier = Modifier.size(15.dp))
+            Icon(Icons.Default.Add, null, tint = MaterialTheme.fit.muted, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(6.dp))
             Text("Set ekle", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.fit.muted)
+        }
+    }
+}
+
+/* ------------------------------ Reçete paneli ------------------------------ */
+
+@Composable
+internal fun actionColor(action: ProgressAction): Color = when (action) {
+    ProgressAction.INCREASE -> MaterialTheme.fit.success
+    ProgressAction.REPS -> MaterialTheme.fit.accent
+    ProgressAction.HOLD -> MaterialTheme.fit.muted
+    ProgressAction.DECREASE -> Palette.warning
+    ProgressAction.DELOAD -> Palette.violet
+    ProgressAction.FIRST -> MaterialTheme.fit.muted
+}
+
+internal fun actionIcon(action: ProgressAction): ImageVector = when (action) {
+    ProgressAction.INCREASE, ProgressAction.REPS -> Icons.Default.TrendingUp
+    ProgressAction.DECREASE, ProgressAction.DELOAD -> Icons.Default.TrendingDown
+    else -> Icons.Default.TrendingFlat
+}
+
+@Composable
+private fun PrescriptionPanel(rx: Prescription) {
+    val color = actionColor(rx.action)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(color.copy(alpha = 0.10f))
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(actionIcon(rx.action), null, tint = color, modifier = Modifier.size(18.dp))
+            Text(
+                "BUGÜN",
+                style = MaterialTheme.typography.labelSmall,
+                color = color
+            )
+            Text(
+                rx.headline,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Badge(rx.action.label, color)
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(rx.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.fit.muted)
+        if (rx.isPlateau || rx.regressing) {
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Warning, null, tint = Palette.warning, modifier = Modifier.size(14.dp))
+                Text(
+                    if (rx.regressing) "Son iki seans en iyi performansının altında."
+                    else "Plato: ${rx.stalledSessions} seanstır yeni zirve yok.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Palette.warning
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WarmupRamp(workWeight: Float, barKg: Float) {
+    val ramp = Calc.warmupScheme(workWeight, barKg).filter { it.first < workWeight }
+    val plates = Calc.plates(workWeight, barKg)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.fit.elevated)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        if (ramp.isNotEmpty()) {
+            Text(
+                "Isınma: " + ramp.joinToString("  ·  ") { "${it.first.trimNum()}×${it.second}" },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.fit.muted
+            )
+        }
+        if (plates.isNotEmpty()) {
+            Text(
+                "Taraf başına: " + plates.joinToString(" + ") { it.trimNum() } + "  (bar ${barKg.trimNum()})",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
         }
     }
 }
@@ -633,81 +822,74 @@ private fun HeaderCell(text: String, modifier: Modifier = Modifier) {
     )
 }
 
+/* --------------------------------- Set satırı -------------------------------- */
+
 @Composable
 private fun SetRow(
     set: WorkoutSetEntity,
     previous: WorkoutSetEntity?,
+    isNext: Boolean,
     isDuration: Boolean,
     isRepsOnly: Boolean,
     onToggle: () -> Unit,
+    onEdit: () -> Unit,
     onUpdate: (WorkoutSetEntity) -> Unit,
     onDelete: () -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
-    val bg = if (set.isCompleted) MaterialTheme.fit.success.copy(alpha = 0.08f) else Color.Transparent
+    val accent = MaterialTheme.fit.accent
+    val bg = when {
+        set.isCompleted -> MaterialTheme.fit.success.copy(alpha = 0.10f)
+        isNext -> accent.copy(alpha = 0.07f)
+        else -> Color.Transparent
+    }
 
-    // Önceki haftadan kalan ağırlık/tekrar/süre varsa ve henüz girilmemişse otomatik olarak kaydet
+    // Değeri boş kalmış setleri önceki seansla doldur (reçete yoksa / serbest antrenmanda).
     LaunchedEffect(set.id, previous) {
-        if (previous != null) {
+        if (previous != null && !set.isCompleted) {
             var needsSync = false
             var newWeight = set.weightKg
             var newReps = set.reps
             var newDur = set.durationSeconds
-            if (set.weightKg <= 0f && previous.weightKg > 0f) {
-                newWeight = previous.weightKg
-                needsSync = true
-            }
-            if (set.reps <= 0 && previous.reps > 0) {
-                newReps = previous.reps
-                needsSync = true
-            }
-            if (set.durationSeconds <= 0 && previous.durationSeconds > 0) {
-                newDur = previous.durationSeconds
-                needsSync = true
-            }
-            if (needsSync) {
-                onUpdate(set.copy(weightKg = newWeight, reps = newReps, durationSeconds = newDur))
-            }
+            if (set.weightKg <= 0f && previous.weightKg > 0f) { newWeight = previous.weightKg; needsSync = true }
+            if (set.reps <= 0 && previous.reps > 0) { newReps = previous.reps; needsSync = true }
+            if (set.durationSeconds <= 0 && previous.durationSeconds > 0) { newDur = previous.durationSeconds; needsSync = true }
+            if (needsSync) onUpdate(set.copy(weightKg = newWeight, reps = newReps, durationSeconds = newDur))
         }
     }
-
-    val effDuration = if (set.durationSeconds > 0) set.durationSeconds else (previous?.durationSeconds ?: 0)
-    val effWeight = if (set.weightKg > 0f) set.weightKg else (previous?.weightKg ?: 0f)
-    val effReps = if (set.reps > 0) set.reps else (previous?.reps ?: 0)
 
     Row(
         Modifier
             .fillMaxWidth()
+            .padding(vertical = 2.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(bg)
+            .then(if (isNext) Modifier.border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(12.dp)) else Modifier)
             .padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(Modifier.width(34.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.width(36.dp), contentAlignment = Alignment.Center) {
             Box(
                 Modifier
-                    .size(26.dp)
+                    .size(30.dp)
                     .clip(RoundedCornerShape(9.dp))
-                    .background(
-                        if (set.isWarmup) Palette.warning.copy(alpha = 0.16f)
-                        else MaterialTheme.fit.elevated
-                    )
+                    .background(if (set.isWarmup) Palette.warning.copy(alpha = 0.16f) else MaterialTheme.fit.elevated)
                     .clickable { menu = true },
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     if (set.isWarmup) "W" else "${set.setNumber}",
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     color = if (set.isWarmup) Palette.warning else MaterialTheme.fit.muted
                 )
             }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 DropdownMenuItem(
-                    text = { Text(if (set.isWarmup) "Normal set yap" else "Isınma seti yap") },
+                    text = { Text(if (set.isWarmup) "Çalışma seti yap" else "Isınma seti yap") },
                     onClick = { menu = false; onUpdate(set.copy(isWarmup = !set.isWarmup)) }
                 )
                 DropdownMenuItem(
-                    text = { Text("Setı sil") },
+                    text = { Text("Seti sil") },
                     onClick = { menu = false; onDelete() },
                     leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.fit.danger) }
                 )
@@ -718,106 +900,299 @@ private fun SetRow(
             previous?.let {
                 if (isDuration) "${it.durationSeconds} sn"
                 else if (it.weightKg > 0f) "${it.weightKg.trimNum()}×${it.reps}"
-                else "${it.reps} tekrar"
+                else "${it.reps}"
             } ?: "—",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.fit.muted,
             textAlign = TextAlign.Center,
             maxLines = 1,
-            modifier = Modifier.weight(1.5f)
+            modifier = Modifier.weight(1.3f)
         )
 
+        // Değer hücreleri: dokununca büyük butonlu editör açılır.
         if (isDuration) {
-            NumberCell(
-                key = "d${set.id}",
-                initial = if (effDuration > 0) effDuration.toString() else "",
-                hint = previous?.durationSeconds?.toString() ?: "0",
-                modifier = Modifier.weight(1.4f)
-            ) { onUpdate(set.copy(durationSeconds = it.toIntOrNull() ?: 0)) }
+            ValueCell(if (set.durationSeconds > 0) "${set.durationSeconds} sn" else "—", Modifier.weight(1.6f), onEdit)
         } else {
-            NumberCell(
-                key = "w${set.id}",
-                initial = if (effWeight > 0f) effWeight.trimNum() else "",
-                hint = previous?.weightKg?.trimNum() ?: "0",
-                decimal = true,
-                modifier = Modifier.weight(1f)
-            ) { onUpdate(set.copy(weightKg = it.replace(',', '.').toFloatOrNull() ?: 0f)) }
-
-            NumberCell(
-                key = "r${set.id}",
-                initial = if (effReps > 0) effReps.toString() else "",
-                hint = previous?.reps?.toString() ?: "0",
-                modifier = Modifier.weight(1f)
-            ) { onUpdate(set.copy(reps = it.toIntOrNull() ?: 0)) }
+            if (!isRepsOnly) ValueCell(if (set.weightKg > 0f) set.weightKg.trimNum() else "—", Modifier.weight(1f), onEdit)
+            ValueCell(if (set.reps > 0) "${set.reps}" else "—", Modifier.weight(1f), onEdit)
         }
+        ValueCell(
+            if (set.rpe > 0f) set.rpe.trimNum() else "–",
+            Modifier.weight(0.8f),
+            onEdit,
+            muted = set.rpe <= 0f
+        )
 
-        NumberCell(
-            key = "e${set.id}",
-            initial = if (set.rpe > 0f) set.rpe.trimNum() else "",
-            hint = "–",
-            decimal = true,
-            modifier = Modifier.weight(0.8f)
-        ) { onUpdate(set.copy(rpe = it.replace(',', '.').toFloatOrNull() ?: 0f)) }
-
-        Box(Modifier.width(38.dp), contentAlignment = Alignment.Center) {
-            CheckCircle(set.isCompleted, onToggle, size = 28.dp)
+        Box(Modifier.width(48.dp), contentAlignment = Alignment.Center) {
+            CheckCircle(set.isCompleted, onToggle, size = 38.dp)
         }
     }
 }
 
-/**
- * Küçük sayısal hücre. Yazarken imlecin kaymaması için metin yerel tutulur,
- * her değişiklikte veritabanına yazılır.
- */
 @Composable
-private fun NumberCell(
-    key: String,
-    initial: String,
-    hint: String,
-    modifier: Modifier = Modifier,
-    decimal: Boolean = false,
-    onChange: (String) -> Unit
-) {
-    var text by remember(key) { mutableStateOf(initial) }
+private fun ValueCell(text: String, modifier: Modifier, onClick: () -> Unit, muted: Boolean = false) {
     Box(
         modifier
             .padding(horizontal = 3.dp)
-            .height(38.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.fit.elevated),
+            .height(44.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(MaterialTheme.fit.elevated)
+            .clickable { onClick() },
         contentAlignment = Alignment.Center
     ) {
-        BasicTextField(
-            value = text,
-            onValueChange = { raw ->
-                val filtered = raw.filter { it.isDigit() || (decimal && (it == '.' || it == ',')) }.take(6)
-                text = filtered
-                onChange(filtered)
-            },
-            singleLine = true,
-            textStyle = MaterialTheme.typography.titleSmall.copy(
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center
-            ),
-            cursorBrush = SolidColor(MaterialTheme.fit.accent),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = if (decimal) KeyboardType.Decimal else KeyboardType.Number
-            ),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-            decorationBox = { inner ->
-                Box(contentAlignment = Alignment.Center) {
-                    if (text.isEmpty()) {
-                        Text(
-                            hint,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.fit.muted.copy(alpha = 0.5f),
-                            textAlign = TextAlign.Center
+        Text(
+            text,
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = if (muted) MaterialTheme.fit.muted.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+            maxLines = 1
+        )
+    }
+}
+
+/* ------------------------------- Set editörü --------------------------------- */
+
+private val RPE_OPTIONS = listOf(0f, 6f, 7f, 7.5f, 8f, 8.5f, 9f, 9.5f, 10f)
+
+private fun rpeMeaning(rpe: Float): String = when {
+    rpe <= 0f -> "RPE girilmedi — progresyon için önerilir."
+    rpe >= 10f -> "Tükeniş: bir tekrar daha yapılamazdı."
+    rpe >= 9.5f -> "Belki bir tekrar daha."
+    rpe >= 9f -> "Bir tekrar daha yapabilirdin."
+    rpe >= 8.5f -> "1-2 tekrar daha yapabilirdin."
+    rpe >= 8f -> "İki tekrar daha yapabilirdin."
+    rpe >= 7.5f -> "2-3 tekrar daha yapabilirdin."
+    rpe >= 7f -> "Üç tekrar daha yapabilirdin."
+    else -> "Dört veya daha fazla tekrar kalmıştı."
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SetEditorSheet(
+    se: SessionExercise,
+    set: WorkoutSetEntity,
+    profile: LoadingProfile,
+    onDismiss: () -> Unit,
+    onSave: (WorkoutSetEntity) -> Unit,
+    onSaveAndComplete: (WorkoutSetEntity) -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val isDuration = se.trackingType == ExerciseEntity.TRACK_DURATION
+    val isRepsOnly = se.trackingType == ExerciseEntity.TRACK_REPS
+    val kind = loadKindOf(se.equipment)
+    val step = profile.step(kind).takeIf { it > 0f } ?: 1f
+
+    var weightText by remember(set.id) { mutableStateOf(if (set.weightKg > 0f) set.weightKg.trimNum() else "") }
+    var repsText by remember(set.id) { mutableStateOf(if (set.reps > 0) set.reps.toString() else "") }
+    var durText by remember(set.id) { mutableStateOf(if (set.durationSeconds > 0) set.durationSeconds.toString() else "") }
+    var rpe by remember(set.id) { mutableStateOf(set.rpe) }
+
+    val weight = weightText.replace(',', '.').toFloatOrNull() ?: 0f
+    val reps = repsText.toIntOrNull() ?: 0
+    val dur = durText.toIntOrNull() ?: 0
+
+    fun build(): WorkoutSetEntity = set.copy(
+        weightKg = if (isDuration || isRepsOnly) set.weightKg else weight,
+        reps = if (isDuration) set.reps else reps,
+        durationSeconds = if (isDuration) dur else set.durationSeconds,
+        rpe = rpe
+    )
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(start = 20.dp, end = 20.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Column {
+                Text(
+                    "${se.name} · ${if (set.isWarmup) "Isınma seti" else "${set.setNumber}. set"}",
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                val prev = se.previous.firstOrNull { it.setNumber == set.setNumber } ?: se.previous.lastOrNull()
+                val rx = se.prescription
+                val info = buildList {
+                    if (rx != null && !set.isWarmup) {
+                        val r = rx.repsFor((set.setNumber - 1).coerceAtLeast(0))
+                        add(if (rx.weight > 0f) "Hedef ${rx.weight.trimNum()} × $r" else "Hedef $r tekrar")
+                    }
+                    if (prev != null) {
+                        add(
+                            "Önceki " + (if (isDuration) "${prev.durationSeconds} sn"
+                            else if (prev.weightKg > 0f) "${prev.weightKg.trimNum()} × ${prev.reps}" else "${prev.reps} tekrar") +
+                                (if (prev.rpe > 0f) " @${prev.rpe.trimNum()}" else "")
                         )
                     }
-                    inner()
+                }
+                if (info.isNotEmpty()) {
+                    Text(info.joinToString("   ·   "), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.fit.muted)
                 }
             }
-        )
+
+            if (isDuration) {
+                StepperBlock(
+                    label = "SÜRE (sn)",
+                    text = durText,
+                    onText = { durText = it.filter(Char::isDigit).take(4) },
+                    onMinus = { durText = (dur - 5).coerceAtLeast(0).toString() },
+                    onPlus = { durText = (dur + 5).toString() },
+                    decimal = false
+                )
+            } else {
+                if (!isRepsOnly) {
+                    StepperBlock(
+                        label = "AĞIRLIK (kg)" + if (kind == LoadKind.DUMBBELL) " · tek dambıl" else "",
+                        text = weightText,
+                        onText = { weightText = it.filter { c -> c.isDigit() || c == '.' || c == ',' }.take(6) },
+                        onMinus = { weightText = (weight - step).coerceAtLeast(0f).trimNum() },
+                        onPlus = { weightText = (weight + step).trimNum() },
+                        decimal = true,
+                        minusLabel = "−${step.trimNum()}",
+                        plusLabel = "+${step.trimNum()}"
+                    )
+                    if (kind == LoadKind.BARBELL && weight > profile.barKg) {
+                        val plates = Calc.plates(weight, profile.barKg)
+                        val achievable = profile.barKg + plates.sum() * 2f
+                        Text(
+                            "Taraf başına: " + plates.joinToString(" + ") { it.trimNum() } +
+                                if (kotlin.math.abs(achievable - weight) > 0.01f) "  (plakayla ${achievable.trimNum()} kg)" else "",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.fit.muted
+                        )
+                    }
+                }
+                StepperBlock(
+                    label = "TEKRAR",
+                    text = repsText,
+                    onText = { repsText = it.filter(Char::isDigit).take(3) },
+                    onMinus = { repsText = (reps - 1).coerceAtLeast(0).toString() },
+                    onPlus = { repsText = (reps + 1).toString() },
+                    decimal = false
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("RPE", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.fit.muted)
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    RPE_OPTIONS.forEach { v ->
+                        val selected = kotlin.math.abs(rpe - v) < 0.01f
+                        val c = if (v >= 9.5f) MaterialTheme.fit.danger else if (v >= 9f) Palette.warning else MaterialTheme.fit.accent
+                        Box(
+                            Modifier
+                                .height(46.dp)
+                                .width(if (v == 0f) 46.dp else 52.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (selected) c else MaterialTheme.fit.elevated)
+                                .clickable { rpe = v },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                if (v == 0f) "–" else v.trimNum(),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+                Text(rpeMeaning(rpe), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.fit.muted)
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                GhostButton("Kaydet", { onSave(build()) }, Modifier.weight(1f))
+                AccentButton(
+                    if (set.isCompleted) "Güncelle" else "Tamamla",
+                    { onSaveAndComplete(build()) },
+                    Modifier.weight(1.4f),
+                    icon = Icons.Default.Check,
+                    color = MaterialTheme.fit.success
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StepperBlock(
+    label: String,
+    text: String,
+    onText: (String) -> Unit,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+    decimal: Boolean,
+    minusLabel: String? = null,
+    plusLabel: String? = null
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.fit.muted)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            StepButton(Icons.Default.Remove, minusLabel, onMinus)
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(64.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.fit.elevated),
+                contentAlignment = Alignment.Center
+            ) {
+                BasicTextField(
+                    value = text,
+                    onValueChange = onText,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.headlineMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.fit.accent),
+                    keyboardOptions = KeyboardOptions(keyboardType = if (decimal) KeyboardType.Decimal else KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                    decorationBox = { inner ->
+                        Box(contentAlignment = Alignment.Center) {
+                            if (text.isEmpty()) {
+                                Text(
+                                    "0",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = MaterialTheme.fit.muted.copy(alpha = 0.4f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                            inner()
+                        }
+                    }
+                )
+            }
+            StepButton(Icons.Default.Add, plusLabel, onPlus)
+        }
+    }
+}
+
+@Composable
+private fun StepButton(icon: ImageVector, label: String?, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .size(64.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.fit.accent.copy(alpha = 0.14f))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (label != null) {
+            Text(label, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.fit.accent)
+        } else {
+            Icon(icon, null, tint = MaterialTheme.fit.accent, modifier = Modifier.size(28.dp))
+        }
     }
 }
 
@@ -826,8 +1201,9 @@ private fun NumberCell(
 @Composable
 private fun FinishDialog(
     doneSets: Int,
-    volume: Float,
+    totalSets: Int,
     elapsed: Int,
+    review: SessionReview,
     onDismiss: () -> Unit,
     onFinish: (String, Int) -> Unit
 ) {
@@ -841,11 +1217,56 @@ private fun FinishDialog(
         containerColor = MaterialTheme.colorScheme.surface,
         title = { Text("Antrenmanı bitir", style = MaterialTheme.typography.titleLarge) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     SummaryPill("Süre", formatDuration(elapsed), Modifier.weight(1f))
-                    SummaryPill("Set", "$doneSets", Modifier.weight(1f))
-                    SummaryPill("Hacim", formatTonnage(volume), Modifier.weight(1f))
+                    SummaryPill("Set", "$doneSets/$totalSets", Modifier.weight(1f))
+                    SummaryPill("Hacim", formatTonnage(review.volume), Modifier.weight(1f))
+                }
+                review.volumeDeltaPct?.let { pct ->
+                    val c = if (pct >= 0) MaterialTheme.fit.success else Palette.warning
+                    Text(
+                        "Önceki aynı güne göre hacim: ${if (pct >= 0) "+" else ""}$pct%",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = c
+                    )
+                }
+                if (doneSets < totalSets) {
+                    Text(
+                        "${totalSets - doneSets} set işaretlenmedi; bunlar kaydedilmeyecek.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Palette.warning
+                    )
+                }
+                if (review.next.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Bir sonraki seans", style = MaterialTheme.typography.titleSmall)
+                        review.next.forEach { (name, rx) ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    actionIcon(rx.action), null,
+                                    tint = actionColor(rx.action),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    name,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    rx.headline,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = actionColor(rx.action)
+                                )
+                            }
+                        }
+                    }
                 }
                 Column {
                     Text("Nasıl geçti?", style = MaterialTheme.typography.titleSmall)

@@ -1,6 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -16,8 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
@@ -26,7 +25,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,6 +37,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
@@ -47,27 +46,32 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.core.MuscleMap
 import com.example.ui.theme.fit
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 /* ==========================================================================
- * Anatomik kas haritası
+ * Anatomik kas haritası (v2)
  *
- * Geometri BodyData.kt içinde; anatomik bir segmentasyon görselinden piksel
- * bazlı iz sürülerek çıkarıldı. Her kas bölgesi ayrı kapalı çokgen kümesi
- * olduğu için tek tek renklendirilebilir.
+ * Geometri BodyData.kt içinde: düz renkli segmentasyon görsellerinden çıkarılmış
+ * ön + arka görünüm, 24 detay bölgesi. Uygulamaya hiçbir görsel dosyası eklenmez;
+ * her şey vektörel çizilir, her ekran boyutunda keskin kalır.
  *
- * Çizim dört katmanda yapılır — düz renk yerine derinlik veren bu sıralama:
- *   1. gövde silueti (hafif dikey degrade + dış hat)
- *   2. çalışılmayan kaslar (siluetten bir ton açık, kendi degradesiyle)
- *   3. vurgulanan kaslar (üstten aydınlık, alta doğru koyulaşan degrade)
- *   4. kas sınırları (arka plan renginde ince oluk) + seçili kasın parlak hattı
- *
- * Uygulamaya hiçbir görsel dosyası eklenmez; her şey vektörel çizilir.
+ * Her kas beş katmanda çizilir:
+ *   1. oluk dolgusu  — kasın koyu tonu, hafif taşırılarak komşu kaslarla arasındaki
+ *                      boşluğu kapatır; aradaki çizgi doğal bir "fasya" oluğu olur
+ *   2. hacim         — sol üstten ışık alan radyal degrade (orta parlak, kenar koyu)
+ *   3. lif dokusu    — kasın anatomik lif yönünde ince çizgiler (yalnızca yeterince
+ *                      büyük çizimlerde; küçük önizlemelerde gürültü olmasın diye kapalı)
+ *   4. iç gölge      — kenar boyunca koyu bir hale, kasa kabarıklık verir
+ *   5. kenar ışığı   — ince açık kontur
+ * Seçili kas, üstüne parlak bir hatla işaretlenir.
  * ========================================================================== */
 
-private const val BW = 114f
-private const val BH = 210f
+private val BW = BodyData.WIDTH
+private val BH = BodyData.HEIGHT
 
 enum class BodyView { FRONT, BACK }
 
@@ -85,7 +89,7 @@ private fun parsePolygons(data: String): List<List<Offset>> =
         if (pts.size >= 3) pts else null
     }
 
-/** Chaikin köşe kesme — taşma yapmadan yumuşatır, kas sınırları birbirine girmez. */
+/** Chaikin köşe kesme — taşma yapmadan yumuşatır. */
 private fun chaikin(points: List<Offset>, iterations: Int): List<Offset> {
     var pts = points
     repeat(iterations) {
@@ -108,55 +112,95 @@ private fun toPath(points: List<Offset>): Path = Path().apply {
     close()
 }
 
-private fun buildPaths(data: String, smoothing: Int = 1): List<Path> =
-    parsePolygons(data).map { toPath(chaikin(it, smoothing)) }
-
 /* -------------------------------- Bölgeler -------------------------------- */
 
-private class Region(val key: String, val paths: List<Path>) {
-    val bounds: List<Rect> by lazy { paths.map { it.getBounds() } }
+/** Tek bir kas parçası (bir bölge birden çok parçadan oluşabilir: sağ/sol, kas başları). */
+private class Piece(points: List<Offset>, angleDeg: Float) {
+    val path: Path = toPath(points)
+    val bounds: Rect = path.getBounds()
+    private val center = Offset(
+        points.sumOf { it.x.toDouble() }.toFloat() / points.size,
+        points.sumOf { it.y.toDouble() }.toFloat() / points.size
+    )
 
-    /** En küçük parçanın alanı — üst üste binen bölgelerde dokunmayı çözerken kullanılır. */
-    val area: Float by lazy {
-        bounds.minOfOrNull { max(it.width * it.height, 0.01f) } ?: Float.MAX_VALUE
+    /** Lif çizgileri: vücudun sağ yarısında açı aynalanır. */
+    val fibers: Path = Path().apply {
+        val a = Math.toRadians((if (center.x > BW / 2f) 180f - angleDeg else angleDeg).toDouble())
+        val dx = cos(a).toFloat()
+        val dy = sin(a).toFloat()
+        val span = sqrt(bounds.width * bounds.width + bounds.height * bounds.height)
+        val spacing = 1.0f
+        val n = (span / spacing).toInt() + 1
+        for (k in -n..n) {
+            val bx = center.x - dy * k * spacing
+            val by = center.y + dx * k * spacing
+            moveTo(bx - dx * span, by - dy * span)
+            lineTo(bx + dx * span, by + dy * span)
+        }
     }
 
-    fun contains(point: Offset): Boolean = bounds.any { it.contains(point) }
+    fun contains(p: Offset): Boolean = bounds.contains(p)
 }
 
-private val frontBody: List<Path> by lazy { buildPaths(BodyData.FRONT_BODY, 1) }
-private val backBody: List<Path> by lazy { buildPaths(BodyData.BACK_BODY, 1) }
-private val frontRegions: List<Region> by lazy {
-    BodyData.FRONT.map { (key, data) -> Region(key, buildPaths(data)) }
+private class Region(val key: String, val group: String, val pieces: List<Piece>) {
+    /** En küçük parçanın alanı — iç içe geçen sınırlarda dokunmayı çözmek için. */
+    fun hitArea(p: Offset): Float? =
+        pieces.filter { it.contains(p) }.minOfOrNull { max(it.bounds.width * it.bounds.height, 0.01f) }
 }
-private val backRegions: List<Region> by lazy {
-    BodyData.BACK.map { (key, data) -> Region(key, buildPaths(data)) }
+
+private fun buildRegions(list: List<BodyData.Region>): List<Region> = list.map { r ->
+    val angle = BodyData.fiberAngle(r.key)
+    Region(r.key, r.group, parsePolygons(r.data).map { Piece(chaikin(it, 1), angle) })
 }
+
+private val frontBody: List<Path> by lazy { parsePolygons(BodyData.FRONT_BODY).map { toPath(chaikin(it, 1)) } }
+private val backBody: List<Path> by lazy { parsePolygons(BodyData.BACK_BODY).map { toPath(chaikin(it, 1)) } }
+private val frontRegions: List<Region> by lazy { buildRegions(BodyData.FRONT) }
+private val backRegions: List<Region> by lazy { buildRegions(BodyData.BACK) }
 
 /* --------------------------- Çizim yardımcıları ---------------------------- */
 
-/** Bir yolu, kendi sınırlarına göre dikey degradeyle doldurur — hacim hissi verir. */
-private fun DrawScope.fillShaded(path: Path, bounds: Rect, top: Color, bottom: Color) {
-    drawPath(
-        path,
-        Brush.verticalGradient(
-            colors = listOf(top, bottom),
-            startY = bounds.top,
-            endY = bounds.bottom.coerceAtLeast(bounds.top + 0.01f)
-        )
-    )
-}
-
 private fun Color.lighten(amount: Float): Color = lerp(this, Color.White, amount)
 private fun Color.darken(amount: Float): Color = lerp(this, Color.Black, amount)
+
+/** Bir kas parçasını hacimli, dokulu ve gölgeli çizer. Tüm ölçüler harita birimindedir. */
+private fun DrawScope.drawMuscle(piece: Piece, base: Color, detailed: Boolean) {
+    val groove = base.darken(0.55f)
+    // 1) oluk dolgusu — komşu kaslarla aradaki boşluğu kapatır
+    drawPath(piece.path, groove)
+    drawPath(piece.path, groove, style = Stroke(1.1f, join = StrokeJoin.Round))
+    // 2) hacim — sol üstten ışık
+    val b = piece.bounds
+    drawPath(
+        piece.path,
+        Brush.radialGradient(
+            0f to base.lighten(0.33f),
+            0.55f to base,
+            1f to base.darken(0.45f),
+            center = Offset(b.left + b.width * 0.38f, b.top + b.height * 0.30f),
+            radius = max(b.width, b.height) * 0.85f
+        )
+    )
+    // 3-4) lif dokusu + iç gölge (kasın içine kırpılmış)
+    clipPath(piece.path) {
+        if (detailed) {
+            drawPath(piece.fibers, Color.White.copy(alpha = 0.12f), style = Stroke(0.28f, cap = StrokeCap.Round))
+        }
+        drawPath(piece.path, Color.Black.copy(alpha = 0.30f), style = Stroke(1.3f, join = StrokeJoin.Round))
+    }
+    // 5) kenar ışığı
+    drawPath(piece.path, base.lighten(0.5f).copy(alpha = 0.22f), style = Stroke(0.3f, join = StrokeJoin.Round))
+}
 
 /* -------------------------------- Composable ------------------------------ */
 
 /**
  * Tek bir vücut görünümü.
  *
- * @param colors anahtarı bulunan kaslar bu renkle boyanır, diğerleri sönük kalır
- * @param selected dokunulan/seçilen kas — parlak hatla çerçevelenir
+ * @param colors kas anahtarı → renk. Önce detay anahtarı ("chest_upper"), yoksa grup
+ *               anahtarı ("chest") aranır. Renk verilmeyen kaslar nötr tonda çizilir.
+ * @param selected seçili kas (grup ya da detay anahtarı) — parlak hatla çerçevelenir
+ * @param onMuscleTap dokunulan kasın GRUP anahtarını döner (MuscleMap anahtarı)
  */
 @Composable
 fun BodyMuscleMap(
@@ -169,23 +213,15 @@ fun BodyMuscleMap(
     val regions = if (view == BodyView.FRONT) frontRegions else backRegions
     val bodyPaths = if (view == BodyView.FRONT) frontBody else backBody
 
-    val bg = MaterialTheme.colorScheme.background
     val isDark = MaterialTheme.fit.isDark
-    val accent = MaterialTheme.fit.accent
-
-    // Gövde ve çalışılmayan kas tonları — koyu temada slate, açık temada gri
-    val silTop = if (isDark) Color(0xFF39465A) else Color(0xFFCBD4E1)
-    val silBottom = if (isDark) Color(0xFF27313F) else Color(0xFFB4BFCE)
-    val restTop = if (isDark) Color(0xFF4A5A72) else Color(0xFFDCE3EC)
-    val restBottom = if (isDark) Color(0xFF36445A) else Color(0xFFC6D0DD)
-    val groove = if (isDark) Color(0xFF1A2130) else Color(0xFFFFFFFF)
-    val rim = if (isDark) Color(0xFF5A6C86) else Color(0xFF9AA7B8)
+    val silTop = if (isDark) Color(0xFF2E3A4B) else Color(0xFFCBD4E1)
+    val silBottom = if (isDark) Color(0xFF1F2833) else Color(0xFFB4BFCE)
+    val rim = if (isDark) Color(0xFF3E4C60) else Color(0xFF9AA7B8)
+    val neutral = if (isDark) Color(0xFF465569) else Color(0xFFC3CCD8)
+    val selectLine = if (isDark) Color.White else Color(0xFF1E1B4B)
+    val selectGlow = Color(0xFFA855F7)
 
     val glow by animateFloatAsState(if (selected != null) 1f else 0f, tween(220), label = "sel")
-
-    // Mor / Lacivert (Deep Purple / Navy Blue) belirgin seçim tonları
-    val exactSelTop = Color(0xFF581C87)     // Koyu Mor
-    val exactSelBottom = Color(0xFF1E1B4B)  // Koyu Lacivert / Gece Mavisi
 
     Canvas(
         modifier.pointerInput(view, onMuscleTap) {
@@ -195,75 +231,46 @@ fun BodyMuscleMap(
                 val dx = (size.width - BW * s) / 2f
                 val dy = (size.height - BH * s) / 2f
                 val local = Offset((tap.x - dx) / s, (tap.y - dy) / s)
-                regions.filter { it.contains(local) }.minByOrNull { it.area }
-                    ?.let { onMuscleTap(it.key) }
+                regions.mapNotNull { r -> r.hitArea(local)?.let { r to it } }
+                    .minByOrNull { it.second }
+                    ?.let { onMuscleTap(it.first.group) }
             }
         }
     ) {
         val s = min(size.width / BW, size.height / BH)
         val dx = (size.width - BW * s) / 2f
         val dy = (size.height - BH * s) / 2f
+        // Lif dokusu yalnızca bir birim en az ~2.4 piksel olduğunda anlamlı.
+        val detailed = s >= 2.4f
 
         withTransform({
             translate(dx, dy)
             scale(s, s, Offset.Zero)
         }) {
-            // 1) gövde silueti
+            // Gövde silueti
             bodyPaths.forEach { p ->
-                fillShaded(p, p.getBounds(), silTop, silBottom)
-            }
-            bodyPaths.forEach { p ->
-                drawPath(p, rim.copy(alpha = 0.55f), style = Stroke(0.7f, join = StrokeJoin.Round))
+                val b = p.getBounds()
+                drawPath(p, Brush.verticalGradient(listOf(silTop, silBottom), startY = b.top, endY = b.bottom))
+                drawPath(p, rim, style = Stroke(0.5f, join = StrokeJoin.Round))
             }
 
-            // 2) çalışılmayan kaslar
+            // Kaslar
             regions.forEach { r ->
-                val isExact = selected != null && r.key == selected
-                val c = colors[r.key]
-
-                if (c == null || c.alpha <= 0.01f) {
-                    if (isExact) {
-                        r.paths.forEachIndexed { i, p -> fillShaded(p, r.bounds[i], exactSelTop, exactSelBottom) }
-                    } else {
-                        val alpha = if (selected != null) 0.5f else 1f
-                        r.paths.forEachIndexed { i, p ->
-                            fillShaded(p, r.bounds[i], restTop.copy(alpha = alpha), restBottom.copy(alpha = alpha))
-                        }
-                    }
-                }
+                val c = colors[r.key] ?: colors[r.group]
+                val isSel = selected != null && (selected == r.group || selected == r.key)
+                // Rengin alfa değeri yoğunluk anlamına gelir: nötr tondan hedef renge doğru karıştırılır.
+                var base = if (c == null || c.alpha <= 0.01f) neutral else lerp(neutral, c.copy(alpha = 1f), c.alpha.coerceIn(0f, 1f))
+                // Bir kas seçiliyken diğerleri geri plana çekilir
+                if (selected != null && !isSel) base = lerp(base, neutral, 0.55f * glow)
+                r.pieces.forEach { drawMuscle(it, base, detailed) }
             }
 
-            // 3) vurgulanan / çalışılan kaslar
-            regions.forEach { r ->
-                val isExact = selected != null && r.key == selected
-                val c = colors[r.key]
-
-                if (c != null && c.alpha > 0.01f) {
-                    if (isExact) {
-                        r.paths.forEachIndexed { i, p -> fillShaded(p, r.bounds[i], exactSelTop, exactSelBottom) }
-                    } else {
-                        val baseC = if (selected != null) c.copy(alpha = c.alpha * 0.45f) else c
-                        r.paths.forEachIndexed { i, p ->
-                            fillShaded(p, r.bounds[i], baseC.lighten(0.16f), baseC.darken(0.14f))
-                        }
-                    }
-                }
-            }
-
-            // 4) kas sınırları — arka plan renginde ince oluk
-            val grooveStroke = Stroke(0.85f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-            regions.forEach { r ->
-                r.paths.forEach { drawPath(it, groove.copy(alpha = 0.75f), style = grooveStroke) }
-            }
-
-            // 5) yalnızca dokunulan seçili kas — mor/lacivert parlak hat + elektrik vurgusu
+            // Seçili kasın parlak hattı
             if (selected != null && glow > 0.01f) {
-                regions.filter { it.key == selected }.forEach { r ->
-                    r.paths.forEach { p ->
-                        // Geniş mor parlama halkası
-                        drawPath(p, Color(0xFFA855F7).copy(alpha = 0.55f * glow), style = Stroke(4.2f, join = StrokeJoin.Round))
-                        // Net iç kontur (Parlak açık mor / lacivert)
-                        drawPath(p, Color(0xFFC084FC).copy(alpha = 0.95f * glow), style = Stroke(1.8f, join = StrokeJoin.Round))
+                regions.filter { selected == it.group || selected == it.key }.forEach { r ->
+                    r.pieces.forEach { p ->
+                        drawPath(p.path, selectGlow.copy(alpha = 0.45f * glow), style = Stroke(2.6f, join = StrokeJoin.Round))
+                        drawPath(p.path, selectLine.copy(alpha = 0.95f * glow), style = Stroke(0.8f, join = StrokeJoin.Round))
                     }
                 }
             }

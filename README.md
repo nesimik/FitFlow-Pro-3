@@ -1,4 +1,66 @@
-# FitFlow Pro
+# FitFlow Pro 2.0
+
+## 2.1 — Yeni anatomik kas haritası
+
+- Geometri yeniden üretildi (`ui/components/BodyData.kt`): düz renkli segmentasyon görsellerinden
+  (ön + arka) OpenCV ile çıkarıldı. 18 yerine 24 detay bölgesi: üst/alt göğüs, önden görünen kanat
+  kası, arkadan görünen oblikler, orta kalça (glute med), kaval kemiği önü (tibialis),
+  infraspinatus, orta trapez ayrı.
+- Her bölgenin bir detay anahtarı (`chest_upper`) ve bir grup anahtarı (`chest`) var. Mevcut ekranlar
+  grup anahtarlarıyla değişmeden çalışır; detay anahtarı verilirse o bölge ayrı renklenir.
+- Yeni çizim (`ui/components/BodyMap.kt`): boşluksuz gövde (oluk dolgusu), sol üstten ışık alan
+  radyal hacim, anatomik yönde kas lifi dokusu, iç gölge ve kenar ışığı. Lif dokusu küçük
+  önizlemelerde otomatik kapanır.
+- Renk alfası artık yoğunluk olarak yorumlanır (nötr tondan hedef renge karışım); seçili kas dışındaki
+  kaslar geri plana çekilir.
+
+## 2.0'da neler değişti
+
+**1. Progresyon motoru artık gerçekten uygulanıyor** (`core/Progression.kt`)
+Eskiden öneri sadece bir yazıydı; seans hep geçen haftanın ağırlığıyla açılıyordu. Artık seans,
+double progression kuralına göre hesaplanan *reçeteyle* açılır:
+- Tüm setlerde üst tekrar (ör. 3×12) + son set RPE < 9.5 → bir kademe ağırlık, tekrar alta (3×10) döner
+- Aralığın içindeyse → aynı ağırlık, her sete +1 tekrar hedefi
+- Üst tekrar ama son set RPE 9.5+ → ağırlık korunur, aynı iş daha rahat tekrar edilir
+- İki seans üst üste alt sınırın altı → bir kademe hafifletilir
+- Deload → ~%90 yük, set yarıya
+Artış adımı ekipmana göre: barbell, **ayarlanabilir dambıl** ve makine/kablo için ayrı ayrı
+(Profil → Ayarlar → Ekipman). Öneri her zaman salonda kurabileceğin bir ağırlıktır.
+
+**2. Tek dokunuşla set kaydı**
+Değerler reçeteyle hazır gelir; doğruysa ✓'e bas, bitti. Değiştirmek gerekirse set satırına dokun:
+büyük −/+ butonlu editör (terli elle, tek elle kullanım), RPE seçici (anlamıyla birlikte),
+barbell için taraf başına plaka dizilimi. Sıradaki set vurgulanır.
+
+**3. Barbell ısınma rampası** — ilk set öncesi ısınma basamakları ve plaka dizilimi kartta görünür.
+
+**4. Güvenilir dinlenme sayacı** — sayaç bitiş zamanına göre çalışır (sapma yok), bildirim
+çubuğunda ve kilit ekranında sistem kronometresiyle geri sayar, bitince titreşimli bildirim gelir.
+Duraklatınca sayaç çubuğunun kaybolması hatası da düzeltildi.
+
+**5. Performansa dayalı deload** — deload önerisi artık takvimden değil; gerileyen / platoya giren
+ana hareketlerden ve RPE birikiminden gelir (döngünün 4. haftasından itibaren). Takvim yalnızca
+güvenlik sınırı olarak kalır.
+
+**6. Plato ve gerileme uyarıları** — 3 seanstır yeni zirve yoksa veya son iki seans en iyinin
+belirgin altındaysa hareket kartında ve ana ekranda uyarı çıkar.
+
+**7. "Bugünün hedefleri"** — ana ekranda, seansı başlatmadan önce her hareketin bugünkü
+ağırlık × tekrar hedefi ve ilerleme yönü görünür.
+
+**8. Bitirme ekranı** — önceki aynı güne göre hacim farkı ve **bir sonraki seansın reçeteleri**.
+
+**9. Veri güvenliği** — `fallbackToDestructiveMigration()` kaldırıldı. Eskiden eksik bir migration
+tüm geçmişi sessizce silebilirdi. Şema değişmedi (DB v4), mevcut verin olduğu gibi kalır.
+
+**10. Sadeleştirme** — seans ekranında her harekette tekrarlanan "Ana" rozeti ve kırmızı YouTube
+ikonu kaldırıldı (video ⋮ menüsünde). Üst çubuktaki ✕ artık seansı *silmiyor*, küçültüyor;
+silme ⋮ menüsünde.
+
+Birim testleri: `app/src/test/java/com/example/ProgressionTest.kt`
+
+---
+
 
 Kişisel antrenman takip uygulaması — Kotlin + Jetpack Compose + Room.
 

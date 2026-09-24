@@ -195,6 +195,17 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
             }
         }
 
+        if (active == null && suggested != null) {
+            item {
+                val plan = remember(suggested, allItems, allSets, workouts, deloadRecommendation) {
+                    vm.planFor(suggested.id)
+                }
+                if (plan.isNotEmpty()) {
+                    Box(Modifier.padding(horizontal = 16.dp)) { TodayPlanCard(plan) }
+                }
+            }
+        }
+
         item {
             Column(Modifier.padding(horizontal = 16.dp)) {
                 SectionHeader("Bu hafta", "$goal antrenman hedefi")
@@ -720,4 +731,52 @@ private fun suggestDay(
         .groupBy { it.routineDayId!! }
         .mapValues { entry -> entry.value.maxOf { it.startedAt } }
     return days.minByOrNull { lastByDay[it.id] ?: 0L }
+}
+
+
+/* ---------------------------- Bugünün hedefleri ---------------------------- */
+
+/** Seans başlamadan önce: her hareket için bugünkü ağırlık × tekrar ve ilerleme yönü. */
+@Composable
+private fun TodayPlanCard(plan: List<Pair<String, com.example.core.Prescription>>) {
+    FitCard {
+        com.example.ui.components.OverlineText("Bugünün hedefleri")
+        Spacer(Modifier.height(10.dp))
+        plan.forEachIndexed { i, (name, rx) ->
+            if (i > 0) Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    actionIcon(rx.action), null,
+                    tint = actionColor(rx.action),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (rx.action == com.example.core.ProgressAction.FIRST) "İlk kayıt" else rx.headline,
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+                    ),
+                    color = if (rx.action == com.example.core.ProgressAction.HOLD) MaterialTheme.colorScheme.onSurface
+                            else actionColor(rx.action)
+                )
+            }
+            if (rx.isPlateau || rx.regressing) {
+                Text(
+                    if (rx.regressing) "Geriliyor — form ve toparlanmayı kontrol et"
+                    else "Plato: ${rx.stalledSessions} seanstır yeni zirve yok",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = com.example.ui.theme.Palette.warning,
+                    modifier = Modifier.padding(start = 26.dp)
+                )
+            }
+        }
+    }
 }

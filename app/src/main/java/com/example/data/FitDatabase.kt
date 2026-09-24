@@ -57,7 +57,9 @@ abstract class FitDatabase : RoomDatabase() {
                 NAME
             )
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
-                .fallbackToDestructiveMigration()
+                // fallbackToDestructiveMigration() BİLEREK kaldırıldı: eksik bir migration
+                // tüm antrenman geçmişini sessizce silmek yerine görünür bir hata vermeli.
+                // Şema değişirse version artırılıp MIGRATION_x_y yazılmalıdır.
                 .build()
                 .also { INSTANCE = it }
         }

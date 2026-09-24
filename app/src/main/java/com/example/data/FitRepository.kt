@@ -338,7 +338,13 @@ class FitRepository(private val context: Context, private val dao: FitDao) {
     /* ------------------------------- Antrenman ------------------------------ */
 
     /** Programdaki bir günden seans başlatır; dayId null ise boş seans açar. */
-    suspend fun startWorkout(dayId: Long?, title: String, routineName: String = "", isDeload: Boolean = false): Long {
+    suspend fun startWorkout(
+        dayId: Long?,
+        title: String,
+        routineName: String = "",
+        isDeload: Boolean = false,
+        profile: com.example.core.LoadingProfile = com.example.core.LoadingProfile()
+    ): Long {
         val now = System.currentTimeMillis()
 
         // Arka planda açık kalan eski seansları otomatik kapat veya temizle (yalnızca 1 aktif seans kalsın)
@@ -386,13 +392,45 @@ class FitRepository(private val context: Context, private val dao: FitDao) {
                 val numSets = if (isDeload) maxOf(1, (baseSets + 1) / 2) else baseSets
                 val isDuration = (ex.trackingType == ExerciseEntity.TRACK_DURATION)
 
+                // Progresyon reçetesi: bu günün geçmişine göre bugünkü ağırlık ve hedef tekrarlar.
+                // Seans, geçen haftanın değerleriyle değil, reçeteyle açılır — tek dokunuşla kayıt.
+                val rx = if (isDuration || item.isWarmup) null else {
+                    val daySets = dao.lastSetsForExerciseInDay(dayId, item.exerciseId)
+                    val sessions = daySets
+                        .filter { !it.isWarmup && it.reps > 0 }
+                        .groupBy { it.workoutId }
+                        .values
+                        .map { ws ->
+                            com.example.core.SessionLog(
+                                ws.first().performedAt,
+                                ws.sortedBy { it.setNumber }.map { com.example.core.LoggedSet(it.weightKg, it.reps, it.rpe) }
+                            )
+                        }
+                        .sortedByDescending { it.dateMillis }
+                        .take(8)
+                    com.example.core.ProgressionEngine.prescribe(
+                        history = sessions,
+                        targetSets = baseSets,
+                        repMin = item.repMin,
+                        repMax = item.repMax,
+                        kind = com.example.core.loadKindOf(ex.equipment),
+                        profile = profile,
+                        deload = isDeload
+                    ).takeIf { it.action != com.example.core.ProgressAction.FIRST }
+                }
+                var workingIndex = 0
+
                 repeat(numSets) { i ->
                     val prefill = cardLastSets.getOrNull(i) ?: cardLastSets.lastOrNull()
-                    val weight = prefill?.weightKg?.takeIf { it > 0f } ?: item.targetWeight
+                    val isWarmupSet = prefill?.isWarmup ?: item.isWarmup
+                    val rxIndex = if (isWarmupSet) -1 else workingIndex++
+                    val baseWeight = prefill?.weightKg?.takeIf { it > 0f } ?: item.targetWeight
+                    val weight = if (rx != null && rxIndex >= 0 && rx.weight > 0f) rx.weight else baseWeight
                     val defaultReps = if (isDeload) 8 else (if (item.repMin > 0) item.repMin else 10)
-                    val reps = if (isDuration) 0 else (prefill?.reps?.takeIf { it > 0 } ?: defaultReps)
+                    val baseReps = prefill?.reps?.takeIf { it > 0 } ?: defaultReps
+                    val reps = if (isDuration) 0 else if (rx != null && rxIndex >= 0) rx.repsFor(rxIndex) else baseReps
                     val exName = if (item.customName.isNotBlank()) item.customName else (prefill?.exerciseName ?: ex.name)
-                    val isWarmup = prefill?.isWarmup ?: item.isWarmup
+                    val isWarmup = isWarmupSet
                     val durationSecs = if (isDuration) {
                         prefill?.durationSeconds?.takeIf { it > 0 } ?: prefill?.reps?.takeIf { it > 0 } ?: if (item.repMin > 0) item.repMin else 30
                     } else 0

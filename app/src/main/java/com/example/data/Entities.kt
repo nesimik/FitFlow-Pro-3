@@ -197,7 +197,12 @@ data class SessionExercise(
     val sets: List<WorkoutSetEntity>,
     val previous: List<WorkoutSetEntity> = emptyList(),
     val videoUrl: String = "",
-    val isWarmup: Boolean = false
+    val isWarmup: Boolean = false,
+    val equipment: String = "",
+    /** Progresyon motorunun bugün için önerisi (süreli / ısınma hareketlerinde null). */
+    val prescription: com.example.core.Prescription? = null,
+    /** Bu günün geçmiş seansları (yeni → eski), yalnızca çalışma setleri. */
+    val history: List<com.example.core.SessionLog> = emptyList()
 ) {
     val completedSets: Int get() = sets.count { it.isCompleted }
     val totalSets: Int get() = sets.size
