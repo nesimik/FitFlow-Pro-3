@@ -390,31 +390,18 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
         }
 
         item {
-            val loads by vm.weeklyMuscleLoads.collectAsStateWithLifecycle()
-            if (loads.any { it.effectiveSets > 0f }) {
-                val accent = MaterialTheme.fit.accent
-                val success = MaterialTheme.fit.success
-                val warning = MaterialTheme.fit.warning
-                val danger = MaterialTheme.fit.danger
-                val mapColors = remember(loads, accent, success, warning, danger) {
-                    loads.mapNotNull { l ->
-                        when (l.status) {
-                            LoadStatus.NONE -> null
-                            LoadStatus.LOW -> l.key to accent.copy(alpha = 0.22f)
-                            LoadStatus.BELOW -> l.key to accent.copy(alpha = 0.48f)
-                            LoadStatus.OPTIMAL -> l.key to success.copy(alpha = 0.9f)
-                            LoadStatus.HIGH -> l.key to warning.copy(alpha = 0.85f)
-                            LoadStatus.EXCESSIVE -> l.key to danger.copy(alpha = 0.9f)
-                        }
-                    }.toMap()
+            // Bugün ekranında harita "toparlanma" modunda: hangi kaslar bugün hazır?
+            // (Haftalık hacim dengesi İlerleme → Kaslar sekmesinde.)
+            val recovery = remember(allSets, exercises) { vm.recoveryNow() }
+            if (recovery.isNotEmpty()) {
+                val mapColors = remember(recovery) {
+                    recovery.mapValues { (_, r) -> com.example.ui.components.MuscleColors.forRecovery(r.state) }
                 }
-                val ready = loads.filter { it.daysSince >= 0 && it.isFresh }
-                    .sortedByDescending { it.daysSince }
-                val resting = loads.filter { it.daysSince >= 0 && !it.isFresh }
-                    .sortedBy { it.daysSince }
+                val tired = recovery.values.filter { it.state != com.example.core.RecoveryState.FRESH }
+                    .sortedBy { it.readiness }
 
                 Column(Modifier.padding(horizontal = 16.dp)) {
-                    SectionHeader("Kas haritası", "Bu haftanın yüklenmesi ve toparlanma durumu")
+                    SectionHeader("Toparlanma", "Son günlerde çalıştırdığın kasların bugünkü durumu")
                     Spacer(Modifier.height(12.dp))
                     FitCard(onClick = {
                         vm.setStatsTab(1)
@@ -424,23 +411,49 @@ fun HomeScreen(vm: AppViewModel, nav: NavHostController) {
                             restoreState = true
                         }
                     }) {
-                        BodyMuscleMapPair(colors = mapColors, height = 190.dp, showLabels = true)
-                        Spacer(Modifier.height(12.dp))
-                        if (ready.isNotEmpty()) {
-                            Text(
-                                "Hazır: " + ready.take(5).joinToString(", ") { MuscleMap.label(it.key) },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.fit.success
-                            )
+                        BodyMuscleMapPair(colors = mapColors, height = 220.dp, showLabels = true)
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            com.example.ui.components.MuscleColors.recoveryLegend.forEach { (c, text) ->
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Box(Modifier.size(10.dp).clip(RoundedCornerShape(3.dp)).background(c))
+                                    Text(text, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.fit.muted)
+                                }
+                            }
                         }
-                        if (resting.isNotEmpty()) {
-                            Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(10.dp))
+                        if (tired.isEmpty()) {
                             Text(
-                                "Toparlanıyor: " + resting.take(5).joinToString(", ") {
-                                    "${MuscleMap.label(it.key)} (${it.daysSince}g)"
-                                },
+                                "Tüm kasların toparlanmış görünüyor — tam yüklenmeye hazırsın.",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.fit.warning
+                                color = com.example.ui.components.MuscleColors.fresh
+                            )
+                        } else {
+                            tired.take(5).forEach { r ->
+                                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        Modifier.size(8.dp).clip(RoundedCornerShape(2.dp))
+                                            .background(com.example.ui.components.MuscleColors.forRecovery(r.state))
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        MuscleMap.label(r.key),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Text(
+                                        "%${(r.readiness * 100).toInt()}" + if (r.readyAt > 0L)
+                                            " · hazır ${com.example.core.formatWeekday(r.readyAt)} ${com.example.core.formatTime(r.readyAt)}" else "",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.fit.muted
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "Tahmin: son setlerine, zorluklarına ve kasın tipik toparlanma süresine göre hesaplanır.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.fit.muted.copy(alpha = 0.7f)
                             )
                         }
                     }

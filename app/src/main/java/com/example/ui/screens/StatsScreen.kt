@@ -521,6 +521,8 @@ private fun OverviewTab(vm: AppViewModel, nav: NavHostController) {
 private fun MusclesTab(vm: AppViewModel) {
     val weekLoads by vm.weeklyMuscleLoads.collectAsStateWithLifecycle()
     val monthLoads by vm.monthlyMuscleLoads.collectAsStateWithLifecycle()
+    val weekDetail by vm.weeklyDetailLoads.collectAsStateWithLifecycle()
+    val monthDetail by vm.monthlyDetailLoads.collectAsStateWithLifecycle()
     val allSets by vm.allSets.collectAsStateWithLifecycle()
     val exercises by vm.exercises.collectAsStateWithLifecycle()
     val allItems by vm.allItems.collectAsStateWithLifecycle()
@@ -611,18 +613,14 @@ private fun MusclesTab(vm: AppViewModel) {
     val warning = MaterialTheme.fit.warning
     val danger = MaterialTheme.fit.danger
 
-    fun colorFor(status: LoadStatus): Color? = when (status) {
-        LoadStatus.NONE -> null
-        LoadStatus.LOW -> accent.copy(alpha = 0.22f)
-        LoadStatus.BELOW -> accent.copy(alpha = 0.48f)
-        LoadStatus.OPTIMAL -> success.copy(alpha = 0.9f)
-        LoadStatus.HIGH -> warning.copy(alpha = 0.85f)
-        LoadStatus.EXCESSIVE -> danger.copy(alpha = 0.9f)
-    }
+    val detail = if (scope == 0) weekDetail else monthDetail
+    val detailMap = detail.associateBy { it.key }
 
-    val colors = remember(loads, accent, success, warning, danger) {
-        loads.mapNotNull { l -> colorFor(l.status)?.let { l.key to it } }.toMap()
+    // Grup renkleri + detay bölgeler (üst / alt göğüs ayrı renklenir).
+    val colors = remember(loads, detail) {
+        (loads + detail).mapNotNull { l -> com.example.ui.components.MuscleColors.forStatus(l.status)?.let { l.key to it } }.toMap()
     }
+    val recovery = remember(allSets, exercises) { vm.recoveryNow() }
 
     val weakLinks = loads.filter { it.status == LoadStatus.LOW || it.status == LoadStatus.BELOW }
         .sortedBy { it.effectiveSets }
@@ -692,13 +690,7 @@ private fun MusclesTab(vm: AppViewModel) {
                     Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    listOf(
-                        accent.copy(alpha = 0.22f) to "Çok az",
-                        accent.copy(alpha = 0.48f) to "Az",
-                        success to "İdeal",
-                        warning to "Yüksek",
-                        danger to "Aşırı"
-                    ).forEach { (c, label) ->
+                    com.example.ui.components.MuscleColors.loadLegend.forEach { (c, label) ->
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                             Box(Modifier.size(10.dp).clip(RoundedCornerShape(3.dp)).background(c))
                             Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.fit.muted)
@@ -740,6 +732,28 @@ private fun MusclesTab(vm: AppViewModel) {
                                 "Son çalışma",
                                 if (load.daysSince < 0) "—" else if (load.daysSince == 0) "bugün" else "${load.daysSince} gün",
                                 Modifier.weight(1f)
+                            )
+                        }
+                        // Göğüs: üst / alt ayrımı
+                        if (key == MuscleMap.CHEST) {
+                            val up = detailMap[MuscleMap.CHEST_UPPER]
+                            val low = detailMap[MuscleMap.CHEST_LOWER]
+                            if (up != null && low != null) {
+                                Spacer(Modifier.height(10.dp))
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    MiniStat("Üst göğüs", "${up.effectiveSets.trimNum()} · ${up.status.label()}", Modifier.weight(1f))
+                                    MiniStat("Alt göğüs", "${low.effectiveSets.trimNum()} · ${low.status.label()}", Modifier.weight(1f))
+                                }
+                            }
+                        }
+                        // Toparlanma durumu
+                        recovery[key]?.let { r ->
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "Toparlanma: %${(r.readiness * 100).toInt()} · ${r.state.label()}" +
+                                    if (r.readyAt > 0L) " · hazır: ${com.example.core.formatWeekday(r.readyAt)} ${com.example.core.formatTime(r.readyAt)}" else "",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = com.example.ui.components.MuscleColors.forRecovery(r.state)
                             )
                         }
                         Spacer(Modifier.height(12.dp))
@@ -1362,14 +1376,8 @@ private fun InsightRow(
 }
 
 @Composable
-private fun statusColor(status: LoadStatus): Color = when (status) {
-    LoadStatus.NONE -> MaterialTheme.fit.muted
-    LoadStatus.LOW -> MaterialTheme.fit.danger
-    LoadStatus.BELOW -> MaterialTheme.fit.warning
-    LoadStatus.OPTIMAL -> MaterialTheme.fit.success
-    LoadStatus.HIGH -> MaterialTheme.fit.warning
-    LoadStatus.EXCESSIVE -> MaterialTheme.fit.danger
-}
+private fun statusColor(status: LoadStatus): Color =
+    com.example.ui.components.MuscleColors.forStatus(status) ?: MaterialTheme.fit.muted
 
 private fun repRangeColor(label: String): Color = when (label) {
     "1-5" -> Palette.danger

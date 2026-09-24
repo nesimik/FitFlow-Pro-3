@@ -35,6 +35,10 @@ object MuscleMap {
     const val CALVES = "calves"
     const val ADDUCTORS = "adductors"
 
+    /** Harita detay bölgeleri (analizde "chest" altında toplanır). */
+    const val CHEST_UPPER = "chest_upper"
+    const val CHEST_LOWER = "chest_lower"
+
     /** Analizlerde ve haritada kullanılan tüm bölgeler, üstten aşağı mantıklı sırada. */
     val all = listOf(
         CHEST, FRONT_DELT, SIDE_DELT, REAR_DELT,
@@ -46,14 +50,14 @@ object MuscleMap {
 
     /** Ön görünümde çizilen bölgeler. */
     val frontVisible = setOf(
-        CHEST, FRONT_DELT, SIDE_DELT, BICEPS, FOREARM,
+        CHEST, FRONT_DELT, SIDE_DELT, BICEPS, TRICEPS, FOREARM, LATS,
         ABS, OBLIQUES, QUADS, ADDUCTORS, CALVES, TRAPS
     )
 
     /** Arka görünümde çizilen bölgeler. */
     val backVisible = setOf(
         TRAPS, UPPER_BACK, LATS, LOWER_BACK, REAR_DELT, SIDE_DELT,
-        TRICEPS, FOREARM, GLUTES, HAMSTRINGS, CALVES
+        TRICEPS, FOREARM, OBLIQUES, GLUTES, HAMSTRINGS, CALVES
     )
 
     fun label(key: String): String = when (key) {
@@ -75,6 +79,8 @@ object MuscleMap {
         HAMSTRINGS -> "Arka bacak"
         CALVES -> "Baldır"
         ADDUCTORS -> "İç bacak"
+        CHEST_UPPER -> "Üst göğüs"
+        CHEST_LOWER -> "Alt göğüs"
         else -> key
     }
 
@@ -113,6 +119,8 @@ object MuscleMap {
         HAMSTRINGS -> 8..16
         CALVES -> 6..16
         ADDUCTORS -> 2..10
+        // Üst+alt katsayıların toplamı ~1.6 olduğu için grup hedefinin ~%80i: grupla tutarlı durum verir.
+        CHEST_UPPER, CHEST_LOWER -> 8..16
         else -> 0..0
     }
 
@@ -127,15 +135,131 @@ object MuscleMap {
 
     /* --------------------------- Hareket → kas eşlemesi -------------------------- */
 
-    data class Activation(val primary: List<String>, val secondary: List<String> = emptyList()) {
+    data class Activation(
+        val primary: List<String>,
+        val secondary: List<String> = emptyList(),
+        /** Hareket için tanımlı kas katkı oranları (0..1). Varsa birincil/ikincil varsayımının yerine geçer. */
+        val custom: Map<String, Float>? = null
+    ) {
         val isEmpty: Boolean get() = primary.isEmpty() && secondary.isEmpty()
 
-        /** Set ağırlıkları: birincil 1.0, ikincil 0.5 */
+        /** Set ağırlıkları: tanımlıysa katkı oranları, değilse birincil 1.0 / ikincil 0.5 */
         fun weights(): Map<String, Float> {
+            custom?.let { return it }
             val m = LinkedHashMap<String, Float>()
             primary.forEach { m[it] = 1f }
             secondary.forEach { if (!m.containsKey(it)) m[it] = 0.5f }
             return m
+        }
+    }
+
+    /* ----------------------------- Kas katkı oranları ---------------------------- */
+    // Bir setin her kasa kaç "etkin set" olarak yazılacağı. 1.0 = hedef kas, 0.5 civarı =
+    // belirgin destek, 0.2-0.3 = küçük katkı. EMG ve hipertrofi çalışmalarındaki genel
+    // eğilimlere dayanan yaklaşık değerlerdir; kesin ölçüm değil, dengeli analiz için referans.
+    // Yalnızca haritada fark yaratacak kadar yaygın hareketler tanımlıdır; diğerleri
+    // birincil/ikincil varsayımına düşer.
+
+    private val contributions: Map<String, Map<String, Float>> by lazy {
+        val m = HashMap<String, Map<String, Float>>()
+        fun c(vararg names: String, w: Map<String, Float>) = names.forEach { m[norm(it)] = w }
+
+        // Göğüs
+        c("Bench Press", "Smith Machine Bench Press", "Chest Press Makinesi",
+            w = mapOf(CHEST to 1f, FRONT_DELT to 0.5f, TRICEPS to 0.5f))
+        c("Dumbbell Bench Press", "Dumbbell Floor Press", "Floor Press",
+            w = mapOf(CHEST to 1f, FRONT_DELT to 0.45f, TRICEPS to 0.4f))
+        c("Incline Bench Press", "Incline Dumbbell Press", "Smith Machine Incline Press", "Incline Chest Press Makinesi",
+            w = mapOf(CHEST to 1f, FRONT_DELT to 0.7f, TRICEPS to 0.4f))
+        c("Decline Bench Press", "Decline Dumbbell Press",
+            w = mapOf(CHEST to 1f, TRICEPS to 0.5f, FRONT_DELT to 0.25f))
+        c("Şınav (Push-Up)", "Push-Up", "Şınav", "Deficit Push-Up", "Incline Push-Up",
+            w = mapOf(CHEST to 1f, FRONT_DELT to 0.5f, TRICEPS to 0.5f, ABS to 0.25f))
+        c("Decline Push-Up", w = mapOf(CHEST to 1f, FRONT_DELT to 0.7f, TRICEPS to 0.5f, ABS to 0.25f))
+        c("Dumbbell Fly", "Incline Dumbbell Fly", "Cable Crossover", "Pec Deck / Butterfly",
+            w = mapOf(CHEST to 1f, FRONT_DELT to 0.3f))
+        c("Dips (Göğüs)", "Ağırlıklı Dips", w = mapOf(CHEST to 1f, TRICEPS to 0.8f, FRONT_DELT to 0.5f))
+
+        // Omuz
+        c("Overhead Press", "Seated Barbell OHP", "Dumbbell Shoulder Press", "Arnold Press",
+            "Machine Shoulder Press", "Smith Machine Shoulder Press",
+            w = mapOf(FRONT_DELT to 1f, SIDE_DELT to 0.5f, TRICEPS to 0.5f, TRAPS to 0.2f))
+        c("Lateral Raise", "Cable Lateral Raise", "Egyptian Cable Lateral Raise", "Machine Lateral Raise",
+            "Dumbbell Lateral Raise", w = mapOf(SIDE_DELT to 1f, TRAPS to 0.2f))
+        c("Rear Delt Fly (Dumbbell)", "Rear Delt Fly", "Dumbbell Reverse Fly", "Reverse Fly",
+            "Reverse Pec Deck", "Cable Rear Delt Cross", w = mapOf(REAR_DELT to 1f, UPPER_BACK to 0.5f, TRAPS to 0.2f))
+        c("Face Pull", w = mapOf(REAR_DELT to 1f, UPPER_BACK to 0.7f, TRAPS to 0.3f))
+
+        // Sırt
+        c("One Arm Dumbbell Row", "One-Arm Dumbbell Row", "Single Arm Dumbbell Row", "Bent Over Dumbbell Row",
+            w = mapOf(LATS to 1f, UPPER_BACK to 0.7f, BICEPS to 0.5f, REAR_DELT to 0.4f, FOREARM to 0.2f))
+        c("Barbell Row", "Pendlay Row", "T-Bar Row",
+            w = mapOf(UPPER_BACK to 1f, LATS to 0.9f, BICEPS to 0.5f, REAR_DELT to 0.5f, LOWER_BACK to 0.3f, FOREARM to 0.2f))
+        c("Seated Cable Row", "Chest Supported Row", "Seal Row",
+            w = mapOf(UPPER_BACK to 1f, LATS to 0.8f, BICEPS to 0.5f, REAR_DELT to 0.4f))
+        c("Lat Pulldown", "Close Grip Pulldown",
+            w = mapOf(LATS to 1f, BICEPS to 0.5f, UPPER_BACK to 0.4f, REAR_DELT to 0.2f))
+        c("Barfiks (Pull-Up)", "Ağırlıklı Barfiks", "Pull-Up",
+            w = mapOf(LATS to 1f, BICEPS to 0.6f, UPPER_BACK to 0.5f, FOREARM to 0.3f, ABS to 0.1f))
+        c("Chin-Up", "Reverse Grip Lat Pulldown", w = mapOf(LATS to 1f, BICEPS to 0.8f, UPPER_BACK to 0.4f, FOREARM to 0.3f))
+        c("Shrug (Barbell)", "Shrug (Dumbbell)", "Shrug", w = mapOf(TRAPS to 1f, FOREARM to 0.3f))
+
+        // Kalça menteşesi
+        c("Deadlift", w = mapOf(GLUTES to 0.9f, HAMSTRINGS to 0.8f, LOWER_BACK to 0.8f, QUADS to 0.5f,
+            ADDUCTORS to 0.5f, TRAPS to 0.4f, FOREARM to 0.4f, LATS to 0.3f))
+        c("Romanian Deadlift", "Dumbbell Romanian Deadlift", "RDL",
+            w = mapOf(HAMSTRINGS to 1f, GLUTES to 0.8f, LOWER_BACK to 0.5f, ADDUCTORS to 0.4f, FOREARM to 0.25f, TRAPS to 0.15f))
+        c("Hip Thrust", "Machine Hip Thrust", "Glute Bridge", w = mapOf(GLUTES to 1f, HAMSTRINGS to 0.3f, ADDUCTORS to 0.2f))
+
+        // Bacak
+        c("Barbell Squat", "Back Squat", w = mapOf(QUADS to 1f, GLUTES to 0.8f, ADDUCTORS to 0.5f,
+            LOWER_BACK to 0.3f, HAMSTRINGS to 0.15f, ABS to 0.15f))
+        c("Goblet Squat", w = mapOf(QUADS to 1f, GLUTES to 0.6f, ADDUCTORS to 0.4f, ABS to 0.2f, UPPER_BACK to 0.15f))
+        c("Front Squat", w = mapOf(QUADS to 1f, GLUTES to 0.6f, ADDUCTORS to 0.4f, ABS to 0.25f, UPPER_BACK to 0.25f))
+        c("Leg Press", "Hack Squat", "Pendulum Squat", w = mapOf(QUADS to 1f, GLUTES to 0.6f, ADDUCTORS to 0.4f))
+        c("Walking Lunge", "Reverse Lunge", "Bulgarian Split Squat", "Step Up",
+            w = mapOf(QUADS to 1f, GLUTES to 0.8f, ADDUCTORS to 0.4f, HAMSTRINGS to 0.2f, CALVES to 0.1f))
+        c("Leg Extension", w = mapOf(QUADS to 1f))
+        c("Leg Curl (Yatarak)", "Seated Leg Curl", "Standing Leg Curl", "Leg Curl", w = mapOf(HAMSTRINGS to 1f, CALVES to 0.1f))
+        c("Calf Raise (Ayakta)", "Standing Calf Raise", "Seated Calf Raise", "Donkey Calf Raise", "Calf Raise",
+            w = mapOf(CALVES to 1f))
+
+        // Kol
+        c("Dumbbell Curl", "Barbell Curl", "EZ-Bar Curl", "Cable Curl", "Incline Dumbbell Curl",
+            w = mapOf(BICEPS to 1f, FOREARM to 0.3f))
+        c("Hammer Curl", "Cable Hammer Curl", "Cross Body Hammer Curl", w = mapOf(BICEPS to 0.8f, FOREARM to 0.7f))
+        c("Triceps Pushdown", "Triceps Pushdown (Düz Bar)", "Rope Pushdown", "Rope Pushdown (Halat)",
+            "Overhead Triceps Extension", "Overhead Cable Triceps Extension", "Skull Crusher", w = mapOf(TRICEPS to 1f))
+        c("Close Grip Bench Press", w = mapOf(TRICEPS to 1f, CHEST to 0.6f, FRONT_DELT to 0.4f))
+
+        // Karın
+        c("Plank", w = mapOf(ABS to 1f, OBLIQUES to 0.5f, LOWER_BACK to 0.2f))
+        c("Crunch", "Crunch (Mekik)", "Cable Crunch", w = mapOf(ABS to 1f, OBLIQUES to 0.3f))
+        c("Hanging Leg Raise", "Leg Raise", "Leg Raise (Yerde)", w = mapOf(ABS to 1f, OBLIQUES to 0.4f, FOREARM to 0.1f))
+        c("Russian Twist", "Side Plank", "Pallof Press", "Cable Woodchopper", w = mapOf(OBLIQUES to 1f, ABS to 0.5f))
+        m
+    }
+
+    /** Katkı tablosundan Activation üretir: 0.75 ve üstü birincil, diğerleri destek. */
+    private fun fromContribution(w: Map<String, Float>) = Activation(
+        primary = w.filterValues { it >= 0.75f }.keys.toList(),
+        secondary = w.filterValues { it < 0.75f }.keys.toList(),
+        custom = w
+    )
+
+    /**
+     * Göğüs setinin üst / alt göğüse dağılımı (göğüs katkısının çarpanı).
+     * Eğimli presler üst göğsü, düz ve negatif presler alt/orta göğsü ağırlıklı çalıştırır.
+     */
+    fun chestSplit(name: String): Pair<Float, Float> {
+        // Türkçe küçük harf dönüşümü "Incline" → "ıncline" yapar; Latin karşılaştırma için ı → i.
+        val n = norm(name).replace('ı', 'i')
+        return when {
+            n.contains("decline push") -> 1f to 0.6f            // ayaklar yüksekte = üst göğüs
+            n.contains("incline push") -> 0.3f to 1f            // eller yüksekte = alt göğüs
+            n.contains("incline") || n.contains("low to high") || n.contains("landmine") -> 1f to 0.6f
+            n.contains("decline") || n.contains("dip") || n.contains("high to low") -> 0.3f to 1f
+            else -> 0.55f to 1f
         }
     }
 
@@ -384,6 +508,7 @@ object MuscleMap {
      * grubunun varsayılan dağılımı kullanılır.
      */
     fun resolve(name: String, muscleGroup: String = "", secondaryMuscles: String = ""): Activation {
+        contributions[norm(name)]?.let { return fromContribution(it) }
         table[norm(name)]?.let { return it }
 
         val n = norm(name)

@@ -214,10 +214,11 @@ fun BodyMuscleMap(
     val bodyPaths = if (view == BodyView.FRONT) frontBody else backBody
 
     val isDark = MaterialTheme.fit.isDark
-    val silTop = if (isDark) Color(0xFF2E3A4B) else Color(0xFFCBD4E1)
-    val silBottom = if (isDark) Color(0xFF1F2833) else Color(0xFFB4BFCE)
+    val silTop = if (isDark) Color(0xFF2C3440) else Color(0xFFD5D9DF)
+    val silBottom = if (isDark) Color(0xFF1E242C) else Color(0xFFBFC4CB)
     val rim = if (isDark) Color(0xFF3E4C60) else Color(0xFF9AA7B8)
-    val neutral = if (isDark) Color(0xFF465569) else Color(0xFFC3CCD8)
+    // Nötr: renksiz, sıcak gri — renkli durumlarla (özellikle mavi tonlarla) karışmasın.
+    val neutral = if (isDark) Color(0xFF4A4D52) else Color(0xFFC9CBCF)
     val selectLine = if (isDark) Color.White else Color(0xFF1E1B4B)
     val selectGlow = Color(0xFFA855F7)
 

@@ -1,5 +1,19 @@
 # FitFlow Pro 2.0
 
+## 2.2 — Kas katkı oranları, üst/alt göğüs, toparlanma haritası
+
+- **Kas katkı oranları** (`core/MuscleMap.kt` → `contributions`): yaygın hareketlerde her kasa
+  düşen pay tanımlı (ör. One Arm Dumbbell Row: kanat 1.0, üst sırt 0.7, biceps 0.5, arka omuz 0.4).
+  Tanımsız hareketler eski birincil 1.0 / destek 0.5 varsayımına düşer.
+- **Üst / alt göğüs** ayrı hesaplanır ve haritada ayrı renklenir (`MuscleMap.chestSplit`,
+  `ProgressAnalytics.detailLoads`). Göğüs detay kartında iki değer birlikte görünür.
+- **Toparlanma tahmini** (`core/Recovery.kt`): son 6 günün setlerinden kas başına hazırlık oranı ve
+  "hazır olacağı an". Ana ekrandaki harita artık toparlanma modunda; haftalık denge İlerleme'de.
+- **Renk sözlüğü** (`ui/components/MuscleColors.kt`): "Çok az" koyu mavi, "Az" açık mavi, nötr gri —
+  artık birbirine karışmıyor. Tüm ekranlar aynı paleti kullanır.
+- Düzeltme: Türkçe küçük harf dönüşümü "Incline"ı "ıncline" yaptığı için eğimli presler tanınmıyordu.
+- Testler: `RecoveryTest.kt`.
+
 ## 2.1 — Yeni anatomik kas haritası
 
 - Geometri yeniden üretildi (`ui/components/BodyData.kt`): düz renkli segmentasyon görsellerinden

@@ -192,6 +192,43 @@ object ProgressAnalytics {
         }
     }
 
+    /**
+     * Haritadaki detay bölgeler (şimdilik üst / alt göğüs) için yüklenme.
+     * Göğüs katkısı, hareketin açısına göre (MuscleMap.chestSplit) iki bölgeye dağıtılır.
+     */
+    fun detailLoads(
+        sets: List<WorkoutSetEntity>,
+        exercises: List<ExerciseEntity>,
+        sinceMillis: Long,
+        periodWeeks: Float = 1f
+    ): List<MuscleLoad> {
+        val exMap = exercises.associateBy { it.id }
+        var upper = 0f; var lower = 0f
+        var upperVol = 0f; var lowerVol = 0f
+        var lastUpper = 0L; var lastLower = 0L
+        sets.filter { Analytics.isEffectiveSet(it) }.forEach { s ->
+            val ex = exMap[s.exerciseId]
+            val w = MuscleMap.resolve(s.exerciseName, ex?.muscleGroup ?: "", ex?.secondaryMuscles ?: "")
+                .weights()[MuscleMap.CHEST] ?: return@forEach
+            val (u, l) = MuscleMap.chestSplit(s.exerciseName)
+            val vol = s.weightKg * s.reps
+            if (s.performedAt >= sinceMillis) {
+                upper += w * u; lower += w * l
+                upperVol += vol * w * u; lowerVol += vol * w * l
+            }
+            if (u > 0f && s.performedAt > lastUpper) lastUpper = s.performedAt
+            if (l > 0f && s.performedAt > lastLower) lastLower = s.performedAt
+        }
+        val now = System.currentTimeMillis()
+        val d = if (periodWeeks <= 0f) 1f else periodWeeks
+        return listOf(
+            MuscleLoad(MuscleMap.CHEST_UPPER, upper / d, upperVol / d,
+                if (lastUpper > 0L) daysBetween(lastUpper, now) else -1, MuscleMap.weeklyTarget(MuscleMap.CHEST_UPPER)),
+            MuscleLoad(MuscleMap.CHEST_LOWER, lower / d, lowerVol / d,
+                if (lastLower > 0L) daysBetween(lastLower, now) else -1, MuscleMap.weeklyTarget(MuscleMap.CHEST_LOWER))
+        )
+    }
+
     /** Kas bazlı tazelik: 0 = bugün çalışıldı, 1 = tamamen dinlenmiş. */
     fun freshness(loads: List<MuscleLoad>): Map<String, Float> =
         loads.associate { load ->

@@ -178,6 +178,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             )
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /** Harita detay bölgeleri (üst / alt göğüs) — bu hafta. */
+    val weeklyDetailLoads: StateFlow<List<MuscleLoad>> =
+        combine(allSets, exercises) { s, e ->
+            ProgressAnalytics.detailLoads(s, e, startOfWeek(System.currentTimeMillis()), 1f)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Harita detay bölgeleri — son 4 haftanın haftalık ortalaması. */
+    val monthlyDetailLoads: StateFlow<List<MuscleLoad>> =
+        combine(allSets, exercises) { s, e ->
+            ProgressAnalytics.detailLoads(s, e, System.currentTimeMillis() - 28L * 86_400_000L, 4f)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Şu anki kas toparlanma tahmini (her çağrıda güncel saatle hesaplanır). */
+    fun recoveryNow(): Map<String, com.example.core.MuscleRecovery> =
+        com.example.core.RecoveryEngine.fromSets(allSets.value, exercises.value)
+
     /** Akut : kronik yüklenme oranı. */
     val trainingLoad: StateFlow<TrainingLoad> =
         combine(workouts, allSets) { w, s -> ProgressAnalytics.trainingLoad(w, s) }
