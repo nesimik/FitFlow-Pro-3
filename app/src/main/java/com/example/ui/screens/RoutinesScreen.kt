@@ -1,5 +1,13 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.example.core.todayWeekday
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -96,13 +104,11 @@ import com.example.ui.components.SectionHeader
 import com.example.ui.components.WeakLinkRecommendationDialog
 import com.example.ui.components.DeloadAlertBox
 import com.example.ui.components.DeloadDesignDialog
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Accessibility
 import androidx.compose.material.icons.filled.Autorenew
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.ui.platform.LocalContext
@@ -171,13 +177,53 @@ fun RoutinesScreen(vm: AppViewModel, nav: NavHostController) {
         )
     }
 
+    val dayItemsOf: (Long) -> List<RoutineItemEntity> = { id -> allItems.filter { it.dayId == id }.sortedBy { it.orderIndex } }
+    val programExerciseCount = remember(days, allItems) {
+        val ids = days.map { it.id }.toSet()
+        allItems.filter { it.dayId in ids && !it.isWarmup }.map { it.exerciseId }.distinct().size
+    }
+    var headerMenu by remember { mutableStateOf(false) }
+    var routineMenu by remember { mutableStateOf(false) }
+
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
             title = "Program",
-            subtitle = active?.description ?: "Antrenman planını yönet",
+            subtitle = if (days.isEmpty()) "Antrenman planını yönet"
+            else "Haftada ${days.count { it.weekday in 1..7 }.takeIf { it > 0 } ?: days.size} gün · $programExerciseCount hareket",
             onBack = if (nav.previousBackStackEntry != null) { { nav.popBackStack() } } else null
         ) {
-            RoundIconButton(Icons.Default.Add, MaterialTheme.fit.accent, 40.dp) { showAddDay = true }
+            Box {
+                RoundIconButton(Icons.Default.MoreVert, MaterialTheme.fit.muted, 40.dp, MaterialTheme.fit.elevated) { headerMenu = true }
+                DropdownMenu(expanded = headerMenu, onDismissRequest = { headerMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Gün ekle") },
+                        onClick = { headerMenu = false; showAddDay = true },
+                        leadingIcon = { Icon(Icons.Default.Add, null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Yeni program") },
+                        onClick = { headerMenu = false; showAddRoutine = true },
+                        leadingIcon = { Icon(Icons.Default.CalendarMonth, null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Program kas haritası") },
+                        onClick = { headerMenu = false; showProgramMuscleMap = true },
+                        leadingIcon = { Icon(Icons.Default.Accessibility, null) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Akıllı öneriler") },
+                        onClick = { headerMenu = false; showWeakLinkAdvisor = true },
+                        leadingIcon = { Icon(Icons.Default.AutoAwesome, null) }
+                    )
+                    if (active != null) {
+                        DropdownMenuItem(
+                            text = { Text("Deload tasarla") },
+                            onClick = { headerMenu = false; showDeloadDesignDialog = true },
+                            leadingIcon = { Icon(Icons.Default.History, null) }
+                        )
+                    }
+                }
+            }
         }
 
         LazyColumn(
@@ -197,47 +243,43 @@ fun RoutinesScreen(vm: AppViewModel, nav: NavHostController) {
                 }
             }
             item {
-                Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    routines.forEach { r ->
-                        ChoiceChip(r.name, r.id == active?.id, { vm.selectRoutine(r.id) })
-                    }
+                Box {
                     Surface(
-                        shape = RoundedCornerShape(30.dp),
-                        color = MaterialTheme.fit.elevated,
-                        modifier = Modifier.clickable { showAddRoutine = true }
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.fit.cardBorder),
+                        modifier = Modifier.clickable { routineMenu = true }
                     ) {
-                        Row(
-                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(Icons.Default.Add, null, tint = MaterialTheme.fit.accent, modifier = Modifier.size(15.dp))
-                            Spacer(Modifier.width(5.dp))
-                            Text("Yeni program", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.fit.accent)
+                        Text(
+                            (active?.name ?: "Program seç") + "  ▾",
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp)
+                        )
+                    }
+                    DropdownMenu(expanded = routineMenu, onDismissRequest = { routineMenu = false }) {
+                        routines.forEach { r ->
+                            DropdownMenuItem(
+                                text = { Text(r.name + if (r.id == active?.id) "  ✓" else "") },
+                                onClick = { routineMenu = false; vm.selectRoutine(r.id) }
+                            )
                         }
+                        DropdownMenuItem(
+                            text = { Text("Yeni program", color = MaterialTheme.fit.accent) },
+                            onClick = { routineMenu = false; showAddRoutine = true },
+                            leadingIcon = { Icon(Icons.Default.Add, null, tint = MaterialTheme.fit.accent) }
+                        )
                     }
                 }
             }
 
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    GhostButton(
-                        text = "Program Kas Haritası",
-                        onClick = { showProgramMuscleMap = true },
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.Accessibility,
-                        color = MaterialTheme.fit.accent
-                    )
-                    GhostButton(
-                        text = "Akıllı Öneriler",
-                        onClick = { showWeakLinkAdvisor = true },
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Default.AutoAwesome
+            if (days.isNotEmpty()) {
+                item { WeekPlanStrip(days) }
+                item {
+                    ProgramCoverageCard(
+                        days = days,
+                        allItems = allItems,
+                        exerciseMap = exerciseMap,
+                        onOpen = { showProgramMuscleMap = true }
                     )
                 }
             }
@@ -253,10 +295,12 @@ fun RoutinesScreen(vm: AppViewModel, nav: NavHostController) {
                     )
                 }
             } else {
-                items(days, key = { it.id }) { day ->
-                    val items = remember(allItems, day.id) { allItems.filter { it.dayId == day.id }.sortedBy { it.orderIndex } }
+                itemsIndexed(days, key = { _, d -> d.id }) { index, day ->
+                    val items = remember(allItems, day.id) { dayItemsOf(day.id) }
                     DayCard(
                         day = day,
+                        color = dayColor(index),
+                        isToday = day.weekday == todayWeekday(),
                         items = items,
                         activeWorkout = activeWorkout,
                         nameOf = { id -> exerciseMap[id]?.name ?: "?" },
@@ -318,9 +362,118 @@ fun RoutinesScreen(vm: AppViewModel, nav: NavHostController) {
     }
 }
 
+/** Günlerin sabit renkleri: haftalık şeritte ve gün kartlarında aynı renk kullanılır. */
+private val DAY_COLORS = listOf(Color(0xFF22D3EE), Color(0xFFA78BFA), Color(0xFF34D399), Color(0xFFF59E0B), Color(0xFFF472B6), Color(0xFF60A5FA), Color(0xFFFB7185))
+private fun dayColor(index: Int): Color = DAY_COLORS[index.mod(DAY_COLORS.size)]
+private val SHORT_WEEKDAYS = listOf("Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz")
+
+private fun dayLetter(day: RoutineDayEntity, index: Int): String =
+    day.name.trim().split(" ").firstOrNull { it.length == 1 }?.uppercase() ?: ('A' + index).toString()
+
+@Composable
+private fun WeekPlanStrip(days: List<RoutineDayEntity>) {
+    FitCard(contentPadding = PaddingValues(12.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            (1..7).forEach { wd ->
+                val idx = days.indexOfFirst { it.weekday == wd }
+                val today = wd == todayWeekday()
+                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        SHORT_WEEKDAYS[wd - 1],
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (today) MaterialTheme.fit.accent else MaterialTheme.fit.muted
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    val c = if (idx >= 0) dayColor(idx) else Color.Transparent
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (idx >= 0) c.copy(alpha = 0.16f) else MaterialTheme.fit.elevated.copy(alpha = 0.5f))
+                            .then(if (idx >= 0) Modifier.border(1.dp, c.copy(alpha = 0.45f), RoundedCornerShape(10.dp)) else Modifier),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (idx >= 0) dayLetter(days[idx], idx) else "·",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (idx >= 0) c else MaterialTheme.fit.muted.copy(alpha = 0.5f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Programın kağıt üzerindeki kas kapsamı: planlanan setler × kas katkı oranları. */
+@Composable
+private fun ProgramCoverageCard(
+    days: List<RoutineDayEntity>,
+    allItems: List<RoutineItemEntity>,
+    exerciseMap: Map<Long, com.example.data.ExerciseEntity>,
+    onOpen: () -> Unit
+) {
+    val loads = remember(days, allItems, exerciseMap) {
+        val ids = days.map { it.id }.toSet()
+        val acc = HashMap<String, Float>()
+        allItems.filter { it.dayId in ids && !it.isWarmup }.forEach { item ->
+            val ex = exerciseMap[item.exerciseId] ?: return@forEach
+            val name = item.customName.ifBlank { ex.name }
+            val w = MuscleMap.resolve(name, ex.muscleGroup, ex.secondaryMuscles).weights()
+            w.forEach { (m, f) -> acc[m] = (acc[m] ?: 0f) + f * item.targetSets }
+            w[MuscleMap.CHEST]?.let { c ->
+                val (u, l) = MuscleMap.chestSplit(name)
+                acc[MuscleMap.CHEST_UPPER] = (acc[MuscleMap.CHEST_UPPER] ?: 0f) + c * u * item.targetSets
+                acc[MuscleMap.CHEST_LOWER] = (acc[MuscleMap.CHEST_LOWER] ?: 0f) + c * l * item.targetSets
+            }
+        }
+        (MuscleMap.all + listOf(MuscleMap.CHEST_UPPER, MuscleMap.CHEST_LOWER)).map { k ->
+            com.example.core.MuscleLoad(k, acc[k] ?: 0f, 0f, -1, MuscleMap.weeklyTarget(k))
+        }
+    }
+    val colors = remember(loads) {
+        loads.mapNotNull { l -> com.example.ui.components.MuscleColors.forStatus(l.status)?.let { l.key to it } }.toMap()
+    }
+    val under = loads.filter { it.key in MuscleMap.all && it.target.first > 0 && it.effectiveSets < it.target.first }
+        .sortedBy { it.effectiveSets / it.target.first }
+    FitCard(onClick = onOpen, contentPadding = PaddingValues(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Programın kas kapsamı", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Text("planlanan haftalık set", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.fit.muted)
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            com.example.ui.components.BodyMuscleMapPair(
+                colors = colors,
+                modifier = Modifier.width(150.dp),
+                height = 150.dp,
+                showLabels = false
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (under.isEmpty()) {
+                    Text("Tüm kaslar hedef aralığında planlanmış.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.fit.success)
+                } else {
+                    under.take(4).forEach { l ->
+                        Text(
+                            "${MuscleMap.label(l.key)} ${l.effectiveSets.trimNum()} / ${l.target.first}+",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = com.example.ui.components.MuscleColors.forStatus(l.status) ?: MaterialTheme.fit.muted
+                        )
+                    }
+                    Text("hedefin altında · dokun →", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.fit.muted)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DayCard(
     day: RoutineDayEntity,
+    color: Color,
+    isToday: Boolean,
     items: List<RoutineItemEntity>,
     activeWorkout: WorkoutEntity?,
     nameOf: (Long) -> String,
@@ -333,33 +486,64 @@ private fun DayCard(
     onDelete: () -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
-    val groups = items.map { groupOf(it.exerciseId) }.distinct()
     val isCurrentActiveDay = activeWorkout != null && !activeWorkout.isFinished && activeWorkout.routineDayId == day.id
+    val work = items.filter { !it.isWarmup }
+    val sets = work.sumOf { it.targetSets }
+    val minutes = (8 + items.sumOf { it.targetSets * (it.restSeconds + 40) } / 60) / 5 * 5
 
-    FitCard {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(day.name, style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (day.focus.isNotBlank()) {
-                    Text(day.focus, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.fit.muted, maxLines = 2)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.fit.cardBorder, RoundedCornerShape(20.dp))
+            .clickable { onOpen() }
+    ) {
+        Box(Modifier.width(4.dp).fillMaxHeight().background(color))
+        Column(Modifier.weight(1f).padding(start = 14.dp, end = 8.dp, top = 12.dp, bottom = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        listOf(day.name, day.focus).filter { it.isNotBlank() }.joinToString(" · "),
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        (if (day.weekday in 1..7) weekdayName(day.weekday) + " · " else "") +
+                            "${work.size} hareket · $sets set · ~$minutes dk",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.fit.muted
+                    )
                 }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                RoundIconButton(Icons.Default.History, MaterialTheme.fit.accent, 36.dp, MaterialTheme.fit.elevated) {
-                    onReplaceFromHistory()
-                }
+                if (isCurrentActiveDay) Badge("DEVAM EDİYOR", MaterialTheme.fit.success)
+                else if (isToday) Badge("BUGÜN", MaterialTheme.fit.accent)
                 Box {
                     RoundIconButton(Icons.Default.MoreVert, MaterialTheme.fit.muted, 36.dp, Color.Transparent) { menu = true }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Geçmiş Seans ile Değiştir") },
-                            onClick = { menu = false; onReplaceFromHistory() },
-                            leadingIcon = { Icon(Icons.Default.History, null, tint = MaterialTheme.fit.accent) }
-                        )
+                        if (isCurrentActiveDay && activeWorkout != null) {
+                            DropdownMenuItem(
+                                text = { Text("Seansa devam et") },
+                                onClick = { menu = false; onContinue(activeWorkout.id) },
+                                leadingIcon = { Icon(Icons.Default.PlayArrow, null, tint = MaterialTheme.fit.success) }
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("Şimdi başlat") },
+                                onClick = { menu = false; onStart() },
+                                leadingIcon = { Icon(Icons.Default.PlayArrow, null, tint = MaterialTheme.fit.accent) }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Düzenle") },
                             onClick = { menu = false; onOpen() },
                             leadingIcon = { Icon(Icons.Default.Edit, null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Geçmiş seans ile değiştir") },
+                            onClick = { menu = false; onReplaceFromHistory() },
+                            leadingIcon = { Icon(Icons.Default.History, null) }
                         )
                         DropdownMenuItem(
                             text = { Text("Kopyala") },
@@ -374,56 +558,32 @@ private fun DayCard(
                     }
                 }
             }
-        }
-
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (day.weekday in 1..7) Badge(weekdayName(day.weekday), MaterialTheme.fit.accent)
-            Badge("${items.size} hareket", MaterialTheme.fit.muted)
-            val supersetCount = items.filter { it.supersetGroup > 0 }.map { it.supersetGroup }.distinct().size
-            if (supersetCount > 0) {
-                Badge("⚡ $supersetCount Süperset", Palette.warning)
-            }
-        }
-
-        if (groups.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                groups.take(5).forEach { g ->
-                    Box(
-                        Modifier
-                            .height(6.dp)
-                            .weight(1f)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(Palette.muscle(g))
-                    )
+            if (work.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                work.take(4).forEach { it ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            (if (it.supersetGroup > 0) "⚡ " else "") + nameOf(it.exerciseId),
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "${it.targetSets} × ${if (it.repMin == it.repMax) "${it.repMin}" else "${it.repMin}–${it.repMax}"}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.fit.muted
+                        )
+                    }
                 }
-            }
-        }
-
-        if (items.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
-            val summaryText = items.take(4).joinToString(" · ") {
-                val base = nameOf(it.exerciseId)
-                if (it.supersetGroup > 0) "⚡ $base (SS${it.supersetGroup})" else base
-            } + if (items.size > 4) " · +${items.size - 4}" else ""
-            Text(
-                summaryText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.fit.muted,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Spacer(Modifier.height(14.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (isCurrentActiveDay && activeWorkout != null) {
-                AccentButton("Seansa Devam Et", { onContinue(activeWorkout.id) }, Modifier.weight(1f), Icons.Default.PlayArrow)
+                if (work.size > 4) {
+                    Text("+${work.size - 4} hareket", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.fit.muted)
+                }
             } else {
-                AccentButton("Başla", onStart, Modifier.weight(1f), Icons.Default.PlayArrow)
+                Spacer(Modifier.height(6.dp))
+                Text("Henüz hareket yok · dokunup ekle", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.fit.muted)
             }
-            GhostButton("Düzenle", onOpen, Modifier.weight(1f), Icons.Default.Edit)
         }
     }
 }
@@ -687,35 +847,42 @@ private fun RoutineItemCard(
                 }
                 if (item.isWarmup) {
                     Badge("Isınma", Palette.warning)
-                } else {
-                    Badge("Ana", MaterialTheme.fit.accent)
+                    Spacer(Modifier.width(4.dp))
                 }
-                Spacer(Modifier.width(4.dp))
-                IconButton(
-                    onClick = {
-                        val title = currentName.ifBlank { displayName }
-                        val targetUrl = if (videoUrl.isNotBlank()) videoUrl else "https://www.youtube.com/results?search_query=${android.net.Uri.encode("$title egzersizi")}"
-                        openUrl(context, targetUrl)
-                    },
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.PlayCircle,
-                        contentDescription = "YouTube videosunu izle",
-                        tint = Color(0xFFFF0000),
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-                Spacer(Modifier.width(2.dp))
-                Icon(
-                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    null,
-                    tint = MaterialTheme.fit.muted
-                )
+                Icon(Icons.Default.ChevronRight, null, tint = MaterialTheme.fit.muted)
             }
 
-            AnimatedVisibility(visible = expanded) {
-                Column(Modifier.padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Düzenleme: satıra dokununca alt panel açılır (büyük butonlar, klavyesiz ayar).
+            if (expanded) RoutineItemSheet(onDismiss = onToggleExpand) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text(currentName.ifBlank { displayName }, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    SheetStepper("Set", item.targetSets, 1, 1, 20, "") { onUpdate(item.copy(targetSets = it)) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            SheetStepper(if (isDuration) "Min (sn)" else "Min tekrar", item.repMin, if (isDuration) 5 else 1, 1, item.repMax, "") {
+                                onUpdate(item.copy(repMin = it))
+                            }
+                        }
+                        Box(Modifier.weight(1f)) {
+                            SheetStepper(if (isDuration) "Maks (sn)" else "Maks tekrar", item.repMax, if (isDuration) 5 else 1, item.repMin, 600, "") {
+                                onUpdate(item.copy(repMax = it))
+                            }
+                        }
+                    }
+                    SheetStepper("Dinlenme", item.restSeconds, 15, 0, 600, " sn") { onUpdate(item.copy(restSeconds = it)) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.weight(1f)) { GhostButton("Videoyu aç", {
+                            val title = currentName.ifBlank { displayName }
+                            val targetUrl = if (videoUrl.isNotBlank()) videoUrl else "https://www.youtube.com/results?search_query=${android.net.Uri.encode("$title egzersizi")}"
+                            openUrl(context, targetUrl)
+                        }, Modifier.fillMaxWidth(), Icons.Default.PlayCircle) }
+                        Box(Modifier.weight(1f)) {
+                            GhostButton(if (isInSuperset) "Süpersetten ayır" else "Süperset yap", {
+                                if (isInSuperset) onSeparateSuperset() else onRequestCombine()
+                            }, Modifier.fillMaxWidth(), Icons.Default.Bolt, Palette.warning)
+                        }
+                    }
+                    Text("Diğer ayarlar", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.fit.muted)
                     FitTextField(
                         value = currentName,
                         onValueChange = {
@@ -724,24 +891,8 @@ private fun RoutineItemCard(
                         },
                         label = "Hareket Adı"
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        MiniNumberField("Set", item.targetSets.toString(), Modifier.weight(1f)) {
-                            onUpdate(item.copy(targetSets = it.toIntOrNull()?.coerceIn(1, 20) ?: item.targetSets))
-                        }
-                        MiniNumberField(if (isDuration) "Min süre (sn)" else "Min tekrar", item.repMin.toString(), Modifier.weight(1f)) {
-                            onUpdate(item.copy(repMin = it.toIntOrNull() ?: item.repMin))
-                        }
-                        MiniNumberField(if (isDuration) "Maks süre (sn)" else "Maks tekrar", item.repMax.toString(), Modifier.weight(1f)) {
-                            onUpdate(item.copy(repMax = it.toIntOrNull() ?: item.repMax))
-                        }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        MiniNumberField("Başlangıç kg", item.targetWeight.trimNum(), Modifier.weight(1f), decimal = true) {
-                            onUpdate(item.copy(targetWeight = it.replace(',', '.').toFloatOrNull() ?: 0f))
-                        }
-                        MiniNumberField("Dinlenme (sn)", item.restSeconds.toString(), Modifier.weight(1f)) {
-                            onUpdate(item.copy(restSeconds = it.toIntOrNull() ?: item.restSeconds))
-                        }
+                    MiniNumberField("Başlangıç kg (ilk seans için)", item.targetWeight.trimNum(), Modifier.fillMaxWidth(), decimal = true) {
+                        onUpdate(item.copy(targetWeight = it.replace(',', '.').toFloatOrNull() ?: 0f))
                     }
                     FitTextField(
                         value = videoUrl,
@@ -795,6 +946,54 @@ private fun RoutineItemCard(
                 }
             }
         }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun RoutineItemSheet(onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(start = 20.dp, end = 20.dp, bottom = 20.dp)
+        ) { content() }
+    }
+}
+
+/** Büyük −/+ butonlu sayı ayarı (klavyesiz). */
+@Composable
+private fun SheetStepper(label: String, value: Int, step: Int, min: Int, max: Int, suffix: String, onChange: (Int) -> Unit) {
+    Column {
+        Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.fit.muted)
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StepBox("−") { onChange((value - step).coerceIn(min, max)) }
+            Box(
+                Modifier.weight(1f).height(52.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.fit.elevated),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("$value$suffix", style = MaterialTheme.typography.titleLarge)
+            }
+            StepBox("+") { onChange((value + step).coerceIn(min, max)) }
+        }
+    }
+}
+
+@Composable
+private fun StepBox(symbol: String, onClick: () -> Unit) {
+    Box(
+        Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(MaterialTheme.fit.accent.copy(alpha = 0.14f)).clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(symbol, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.fit.accent)
     }
 }
 

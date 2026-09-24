@@ -1,5 +1,30 @@
 # FitFlow Pro 2.0
 
+## 2.3 — Arayüz yenilemesi
+
+- **Bugün (ana ekran)** 11 bloktan 4'e indi: Bugün kartı (antrenman günü: hedefler + başlat;
+  dinlenme günü: sıradaki seans + toparlanma çakışma uyarısı; devam eden seans), Bu hafta şeridi,
+  Toparlanma haritası, Son antrenman. Sağ üstte ⚙ → Profil ve ayarlar.
+- **Alt menü 4 sekme**: Bugün · Program · İlerleme · Hareket. Profil ⚙ ikonuna taşındı, yan menü kapatıldı.
+- **İlerleme 3 sekme**: Özet (bu hafta, haftalık hacim/set, tutarlılık, ilerleyen/platodaki hareketler),
+  Kaslar (harita + kas detayı + en eksikten sıralı liste; akıllı öneriler detay kartında),
+  Güç (lift dengesi görsel kartı + güç seviyeleri + 1RM gelişimi; rekorlar alt sayfa).
+- **Lift dengesi düzeltmesi**: RDL artık klasik deadlift sayılmıyor (kendi beklenen oranı 0.95);
+  dambıl varyasyonları tahmini barbell karşılığına çevrilerek dengeye katılıyor.
+- **Program**: açılır program seçici, haftalık gün şeridi, programın planlanan kas kapsamı kartı,
+  sade gün kartları (⋮: başlat, düzenle, geçmişle değiştir, kopyala, sil). Gün düzenleyicide satıra
+  dokununca büyük −/+ butonlu düzenleme paneli.
+- **Hareketler**: kas / bölge adıyla arama (`core/MuscleSearch.kt`): "kalça", "arka bacak", "pazu",
+  "üst göğüs"… hareketleri o kası çalıştırma oranına göre sıralar; Türkçe karaktersiz yazım da çalışır.
+  "Programımda" filtresi, satırlarda mini kas haritası, son en iyi set ve 8 haftalık değişim.
+- **Hareket detayı**: sıradaki seansın reçetesi, 1RM / en iyi set / seans özeti, katkı oranlı kas haritası,
+  tekrar aralığına göre rekorlar.
+- **Kütüphaneye 25 hareket eklendi** (221): makinesiz arka bacak (Dumbbell Leg Curl, Sliding Leg Curl,
+  Stiff Leg / Single Leg RDL), kalça (Dumbbell Hip Thrust, Cable Pull-Through, Cable Hip Abduction),
+  Chest Supported Dumbbell Row, omuz sağlığı (External Rotation, Incline Y Raise), Landmine Press,
+  Single Leg Calf Raise, Suitcase Carry, Copenhagen Plank ve diğerleri. Mevcut kurulumlara açılışta
+  otomatik eklenir.
+
 ## 2.2 — Kas katkı oranları, üst/alt göğüs, toparlanma haritası
 
 - **Kas katkı oranları** (`core/MuscleMap.kt` → `contributions`): yaygın hareketlerde her kasa

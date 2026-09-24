@@ -232,6 +232,28 @@ object MuscleMap {
             "Overhead Triceps Extension", "Overhead Cable Triceps Extension", "Skull Crusher", w = mapOf(TRICEPS to 1f))
         c("Close Grip Bench Press", w = mapOf(TRICEPS to 1f, CHEST to 0.6f, FRONT_DELT to 0.4f))
 
+        // 2.3 ile kütüphaneye eklenenler
+        c("Dumbbell Leg Curl", "Sliding Leg Curl", w = mapOf(HAMSTRINGS to 1f, CALVES to 0.1f, GLUTES to 0.1f))
+        c("Stiff Leg Deadlift", w = mapOf(HAMSTRINGS to 1f, GLUTES to 0.7f, LOWER_BACK to 0.6f, FOREARM to 0.25f))
+        c("Single Leg Romanian Deadlift", w = mapOf(HAMSTRINGS to 1f, GLUTES to 0.9f, LOWER_BACK to 0.3f, ADDUCTORS to 0.3f, FOREARM to 0.2f))
+        c("Cable Pull-Through", w = mapOf(GLUTES to 1f, HAMSTRINGS to 0.7f, LOWER_BACK to 0.2f))
+        c("Dumbbell Hip Thrust", "Single Leg Glute Bridge", w = mapOf(GLUTES to 1f, HAMSTRINGS to 0.35f, ADDUCTORS to 0.2f))
+        c("Cable Hip Abduction", "Abduction (Kalça Açma)", w = mapOf(GLUTES to 1f))
+        c("Heel Elevated Goblet Squat", w = mapOf(QUADS to 1f, GLUTES to 0.5f, ADDUCTORS to 0.35f, ABS to 0.2f))
+        c("Dumbbell Split Squat", "Smith Machine Squat", w = mapOf(QUADS to 1f, GLUTES to 0.7f, ADDUCTORS to 0.4f, HAMSTRINGS to 0.15f))
+        c("Single Leg Calf Raise", w = mapOf(CALVES to 1f))
+        c("Chest Supported Dumbbell Row", w = mapOf(UPPER_BACK to 1f, LATS to 0.7f, REAR_DELT to 0.6f, BICEPS to 0.5f))
+        c("Single Arm Lat Pulldown", "Single Arm Cable Row", w = mapOf(LATS to 1f, BICEPS to 0.5f, UPPER_BACK to 0.4f))
+        c("Dumbbell External Rotation", "Cable External Rotation", w = mapOf(REAR_DELT to 1f, UPPER_BACK to 0.3f))
+        c("Incline Y Raise", w = mapOf(REAR_DELT to 1f, TRAPS to 0.6f, SIDE_DELT to 0.5f, UPPER_BACK to 0.5f))
+        c("Landmine Press", w = mapOf(FRONT_DELT to 1f, CHEST to 0.5f, TRICEPS to 0.5f, SIDE_DELT to 0.3f, ABS to 0.2f))
+        c("Seated Dumbbell Lateral Raise", w = mapOf(SIDE_DELT to 1f, TRAPS to 0.15f))
+        c("Bayesian Cable Curl", w = mapOf(BICEPS to 1f, FOREARM to 0.2f))
+        c("Zottman Curl", w = mapOf(BICEPS to 0.9f, FOREARM to 0.8f))
+        c("Suitcase Carry", w = mapOf(OBLIQUES to 1f, FOREARM to 0.7f, TRAPS to 0.5f, ABS to 0.4f))
+        c("Reverse Crunch", w = mapOf(ABS to 1f, OBLIQUES to 0.3f))
+        c("Copenhagen Plank", w = mapOf(ADDUCTORS to 1f, OBLIQUES to 0.8f, ABS to 0.3f))
+
         // Karın
         c("Plank", w = mapOf(ABS to 1f, OBLIQUES to 0.5f, LOWER_BACK to 0.2f))
         c("Crunch", "Crunch (Mekik)", "Cable Crunch", w = mapOf(ABS to 1f, OBLIQUES to 0.3f))

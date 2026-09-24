@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -152,14 +153,23 @@ fun StatsScreen(vm: AppViewModel, nav: NavHostController) {
             }
         }
         Box(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-            PillTabs(listOf("Genel", "Kaslar", "Güç", "Rekor"), tab) { vm.setStatsTab(it) }
+            // 3 sekme: Özet · Kaslar · Güç. Rekorlar Güç sekmesinin alt sayfası (tab = 3).
+            PillTabs(listOf("Özet", "Kaslar", "Güç"), if (tab == 3) 2 else tab) { vm.setStatsTab(it) }
         }
         Spacer(Modifier.height(8.dp))
         when (tab) {
             0 -> OverviewTab(vm, nav)
             1 -> MusclesTab(vm)
             2 -> StrengthTab(vm, nav)
-            else -> RecordsTab(vm, nav)
+            else -> Column {
+                Text(
+                    "← Güç",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.fit.accent,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp).clickable { vm.setStatsTab(2) }
+                )
+                RecordsTab(vm, nav)
+            }
         }
     }
 }
@@ -170,180 +180,82 @@ fun StatsScreen(vm: AppViewModel, nav: NavHostController) {
 private fun OverviewTab(vm: AppViewModel, nav: NavHostController) {
     val stats by vm.dashboard.collectAsStateWithLifecycle()
     val weekly by vm.weeklySeries.collectAsStateWithLifecycle()
-    val monthly by vm.monthlySeries.collectAsStateWithLifecycle()
-    val heat by vm.heatmap.collectAsStateWithLifecycle()
-    val load by vm.trainingLoad.collectAsStateWithLifecycle()
     val adherence by vm.adherence.collectAsStateWithLifecycle()
-    val repRanges by vm.repRanges.collectAsStateWithLifecycle()
     val stagnant by vm.stagnantLifts.collectAsStateWithLifecycle()
     val improving by vm.improvingLifts.collectAsStateWithLifecycle()
     val rpe by vm.weeklyRpe.collectAsStateWithLifecycle()
-
-    var period by rememberSaveable { mutableIntStateOf(0) }
     var metric by rememberSaveable { mutableIntStateOf(0) }
-    val series = if (period == 0) weekly else monthly
 
     LazyColumn(
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 110.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        /* --------------------------- Hafta karşılaştırma --------------------------- */
+        /* Bu hafta — geçen haftaya göre */
         item {
             FitCard {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    OverlineText("BU HAFTA — GEÇEN HAFTAYA GÖRE")
-                    Badge(
-                        ProgressAnalytics.deltaText(stats.thisWeekVolume, stats.lastWeekVolume),
-                        if (stats.thisWeekVolume >= stats.lastWeekVolume) MaterialTheme.fit.success else MaterialTheme.fit.danger
-                    )
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Bu hafta", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                    Text("geçen haftaya göre", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.fit.muted)
                 }
                 Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    CompareCell("Hacim", formatTonnage(stats.thisWeekVolume), formatTonnage(stats.lastWeekVolume), Modifier.weight(1f))
-                    CompareCell("Seans", "${stats.thisWeekWorkouts}", "${stats.lastWeekWorkouts}", Modifier.weight(1f))
-                    CompareCell("Set", "${stats.thisWeekSets}", "—", Modifier.weight(1f))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    KpiCell("Antrenman", "${stats.thisWeekWorkouts}", deltaInt(stats.thisWeekWorkouts, stats.lastWeekWorkouts), Modifier.weight(1f))
+                    KpiCell("Hacim", formatTonnage(stats.thisWeekVolume), ProgressAnalytics.deltaText(stats.thisWeekVolume, stats.lastWeekVolume)
+                        .takeIf { stats.lastWeekVolume > 0f }, Modifier.weight(1f), positive = stats.thisWeekVolume >= stats.lastWeekVolume)
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    KpiCell("Set", "${stats.thisWeekSets}", null, Modifier.weight(1f))
+                    val lastRpe = rpe.lastOrNull()?.second
+                    KpiCell("Ort. RPE", lastRpe?.trimNum() ?: "—", "hedef 7–8", Modifier.weight(1f), positive = null)
                 }
             }
         }
 
-        /* ----------------------------- Yüklenme dengesi --------------------------- */
-        item {
-            Column {
-                SectionHeader("Yüklenme dengesi", "Son 7 gün / son 4 haftanın haftalık ortalaması")
-                Spacer(Modifier.height(12.dp))
+        /* Haftalık hacim / set */
+        if (weekly.isNotEmpty()) {
+            item {
                 FitCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val ratioColor = when {
-                            load.chronicWeekly <= 0f -> MaterialTheme.fit.muted
-                            load.ratio < 0.75f -> MaterialTheme.fit.warning
-                            load.ratio <= 1.3f -> MaterialTheme.fit.success
-                            load.ratio <= 1.5f -> MaterialTheme.fit.warning
-                            else -> MaterialTheme.fit.danger
-                        }
-                        ProgressRing(
-                            progress = (load.ratio / 2f).coerceIn(0f, 1f),
-                            size = 88.dp,
-                            stroke = 9.dp,
-                            color = ratioColor
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    if (load.chronicWeekly <= 0f) "—" else load.ratio.trimNum(),
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    color = ratioColor
-                                )
-                                Text("oran", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.fit.muted)
-                            }
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(load.status, style = MaterialTheme.typography.titleMedium, color = ratioColor)
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                load.advice,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.fit.muted
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(14.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        MiniStat("Son 7 gün", formatTonnage(load.acuteVolume), Modifier.weight(1f))
-                        MiniStat("Haftalık ort.", formatTonnage(load.chronicWeekly), Modifier.weight(1f))
-                        MiniStat("Set (7 gün)", "${load.acuteSets}", Modifier.weight(1f))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Haftalık", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        Text("son ${minOf(8, weekly.size)} hafta", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.fit.muted)
                     }
                     Spacer(Modifier.height(10.dp))
-                    InfoNote("0.8–1.3 arası oran sürdürülebilir kabul edilir. 1.5 üstü, hacmi alıştığından çok hızlı artırdığını gösterir.")
+                    PillTabs(listOf("Hacim", "Set"), metric) { metric = it }
+                    Spacer(Modifier.height(12.dp))
+                    val series = weekly.takeLast(8)
+                    BarChart(
+                        series.map { if (metric == 0) it.volume else it.sets.toFloat() },
+                        series.map { it.label },
+                        suffix = if (metric == 0) " kg" else " set",
+                        height = 160.dp
+                    )
                 }
             }
         }
 
-        /* --------------------------------- Trend --------------------------------- */
-        item {
-            Column {
-                SectionHeader("Trend")
-                Spacer(Modifier.height(10.dp))
-                PillTabs(listOf("Haftalık", "Aylık"), period) { period = it }
-                Spacer(Modifier.height(8.dp))
-                PillTabs(listOf("Hacim", "Set", "Seans", "Süre"), metric) { metric = it }
-                Spacer(Modifier.height(12.dp))
-                FitCard {
-                    val values = series.map {
-                        when (metric) {
-                            0 -> it.volume
-                            1 -> it.sets.toFloat()
-                            2 -> it.workouts.toFloat()
-                            else -> it.durationSec / 60f
-                        }
-                    }
-                    val labels = series.map { it.label }
-                    if (metric == 0) {
-                        LineChart(values, labels, suffix = " kg", height = 180.dp)
-                    } else {
-                        BarChart(
-                            values, labels,
-                            suffix = when (metric) { 1 -> " set"; 2 -> " seans"; else -> " dk" },
-                            height = 170.dp
-                        )
-                    }
-                    if (metric == 0 && values.size >= 4) {
-                        Spacer(Modifier.height(10.dp))
-                        val ma = values.takeLast(4).average().toFloat()
-                        InfoNote("Son 4 dönemin ortalaması ${formatTonnage(ma)}. Tek haftanın düşüşü sorun değil; eğilim önemli.")
-                    }
-                }
-            }
-        }
-
-        /* ------------------------------- Tutarlılık ------------------------------ */
+        /* Tutarlılık */
         if (adherence.isNotEmpty()) {
             item {
-                Column {
-                    SectionHeader("Tutarlılık", "Haftalık hedefe uyum — son 8 hafta")
+                FitCard {
+                    val pct = ProgressAnalytics.adherencePct(adherence)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Tutarlılık", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        Text(
+                            "${adherence.sumOf { it.workouts }} antrenman · hedefe ulaşılan hafta %$pct",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.fit.muted
+                        )
+                    }
                     Spacer(Modifier.height(12.dp))
-                    FitCard {
-                        val pct = ProgressAnalytics.adherencePct(adherence)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("%$pct", style = MaterialTheme.typography.displaySmall, color = MaterialTheme.fit.accent)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("hedefe ulaşılan hafta", style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    "${adherence.count { it.met }} / ${adherence.size} hafta",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.fit.muted
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(14.dp))
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            adherence.forEach { w ->
-                                Column(
-                                    Modifier.weight(1f),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        adherence.forEach { w ->
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                val slots = maxOf(w.goal, w.workouts, 1)
+                                (0 until slots).forEach { i ->
                                     Box(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .height(46.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(MaterialTheme.fit.elevated),
-                                        contentAlignment = Alignment.BottomCenter
-                                    ) {
-                                        val frac = if (w.goal <= 0) 0f else (w.workouts.toFloat() / w.goal).coerceIn(0f, 1f)
-                                        Box(
-                                            Modifier
-                                                .fillMaxWidth()
-                                                .height((46 * frac).dp.coerceAtLeast(3.dp))
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(if (w.met) MaterialTheme.fit.success else MaterialTheme.fit.accent.copy(alpha = 0.55f))
-                                        )
-                                    }
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        "${w.workouts}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.fit.muted
+                                        Modifier.fillMaxWidth().height(9.dp).clip(RoundedCornerShape(3.dp))
+                                            .background(if (i < w.workouts) MaterialTheme.fit.success else MaterialTheme.fit.elevated)
                                     )
                                 }
                             }
@@ -353,165 +265,63 @@ private fun OverviewTab(vm: AppViewModel, nav: NavHostController) {
             }
         }
 
-        /* -------------------------------- Aktivite ------------------------------- */
-        item {
-            Column {
-                SectionHeader("Aktivite", "Antrenman yoğunluğu takvimi")
-                Spacer(Modifier.height(12.dp))
+        /* Hareketler: ilerleyenler ve takılanlar */
+        if (improving.isNotEmpty() || stagnant.isNotEmpty()) {
+            item {
                 FitCard {
-                    ActivityHeatmap(heat, color = MaterialTheme.fit.accent)
-                    Spacer(Modifier.height(10.dp))
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Az", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.fit.muted)
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            listOf(0f, 0.32f, 0.52f, 0.76f, 1f).forEach { a ->
-                                Box(
-                                    Modifier
-                                        .size(11.dp)
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(
-                                            if (a == 0f) MaterialTheme.fit.elevated
-                                            else MaterialTheme.fit.accent.copy(alpha = a)
-                                        )
-                                )
-                            }
+                    Text("Hareketler", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(6.dp))
+                    improving.take(4).forEach { lift ->
+                        LiftTrendRow("İLERLİYOR", MaterialTheme.fit.success, lift.name, "1RM ${lift.bestE1rm.kg()}") {
+                            nav.navigate("${Routes.EXERCISE}/${lift.exerciseId}")
                         }
-                        Text("Çok", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.fit.muted)
                     }
-                }
-            }
-        }
-
-        /* ---------------------------- Tekrar dağılımı ---------------------------- */
-        if (repRanges.isNotEmpty()) {
-            item {
-                Column {
-                    SectionHeader("Tekrar aralığı dağılımı", "Hangi amaca ne kadar çalıştın")
-                    Spacer(Modifier.height(12.dp))
-                    FitCard {
-                        DistributionBars(
-                            repRanges.map {
-                                DistributionItem(
-                                    label = "${it.label} tekrar",
-                                    value = it.sets.toFloat(),
-                                    color = repRangeColor(it.label),
-                                    caption = "${(it.share * 100).roundToInt()}% · ${it.purpose}"
-                                )
-                            },
-                            valueSuffix = " set"
-                        )
-                    }
-                }
-            }
-        }
-
-        /* ---------------------------------- RPE ---------------------------------- */
-        if (rpe.size >= 3) {
-            item {
-                Column {
-                    SectionHeader("Zorlanma (RPE) eğilimi", "Haftalık ortalama")
-                    Spacer(Modifier.height(12.dp))
-                    FitCard {
-                        LineChart(
-                            rpe.map { it.second },
-                            rpe.map { it.first },
-                            suffix = "",
-                            height = 140.dp,
-                            color = Palette.warning
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        val avg = rpe.map { it.second }.average().toFloat()
-                        InfoNote(
-                            when {
-                                avg >= 9f -> "Ortalama RPE ${avg.trimNum()} — sürekli sınırda çalışıyorsun. Toparlanma zamanla açık verebilir."
-                                avg >= 7f -> "Ortalama RPE ${avg.trimNum()} — hipertrofi için verimli bant."
-                                else -> "Ortalama RPE ${avg.trimNum()} — setleri biraz daha zorlaştırmak ilerlemeyi hızlandırabilir."
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        /* ------------------------------- İçgörüler ------------------------------- */
-        if (improving.isNotEmpty()) {
-            item {
-                Column {
-                    SectionHeader("İlerleme kaydettiklerin", "Son seansta rekor kırılan hareketler")
-                    Spacer(Modifier.height(12.dp))
-                    FitCard {
-                        improving.take(5).forEach { lift ->
-                            InsightRow(
-                                icon = Icons.AutoMirrored.Filled.TrendingUp,
-                                tint = MaterialTheme.fit.success,
-                                title = lift.name,
-                                subtitle = "Tahmini 1RM ${lift.bestE1rm.kg()}",
-                                onClick = { nav.navigate("${Routes.EXERCISE}/${lift.exerciseId}") }
-                            )
+                    stagnant.take(4).forEach { lift ->
+                        LiftTrendRow("PLATO", MaterialTheme.fit.warning, lift.name, "${lift.sessionsSinceBest} seanstır rekor yok") {
+                            nav.navigate("${Routes.EXERCISE}/${lift.exerciseId}")
                         }
                     }
                 }
             }
         }
+    }
+}
 
-        if (stagnant.isNotEmpty()) {
-            item {
-                Column {
-                    SectionHeader("Takılan hareketler", "Uzun süredir rekor yok")
-                    Spacer(Modifier.height(12.dp))
-                    FitCard {
-                        stagnant.take(5).forEach { lift ->
-                            InsightRow(
-                                icon = Icons.AutoMirrored.Filled.TrendingDown,
-                                tint = MaterialTheme.fit.warning,
-                                title = lift.name,
-                                subtitle = "${lift.daysSinceBest} gün · ${lift.sessionsSinceBest} seans · en iyi ${lift.bestE1rm.kg()}",
-                                onClick = { nav.navigate("${Routes.EXERCISE}/${lift.exerciseId}") }
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        InfoNote(
-                            "Takılan bir harekette denenecekler: tekrar aralığını değiştir, bir hafta hacmi düşür (deload), " +
-                                "ya da benzer bir varyasyona geç (ör. bench yerine incline bench)."
-                        )
-                    }
+@Composable
+private fun KpiCell(label: String, value: String, delta: String?, modifier: Modifier = Modifier, positive: Boolean? = true) {
+    Column(
+        modifier.clip(RoundedCornerShape(14.dp)).background(MaterialTheme.fit.elevated).padding(12.dp)
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.fit.muted)
+        Text(value, style = MaterialTheme.typography.titleLarge, maxLines = 1)
+        if (delta != null) {
+            Text(
+                delta,
+                style = MaterialTheme.typography.labelMedium,
+                color = when (positive) {
+                    null -> MaterialTheme.fit.muted
+                    true -> MaterialTheme.fit.success
+                    false -> MaterialTheme.fit.warning
                 }
-            }
+            )
         }
+    }
+}
 
-        /* ------------------------------- Toplamlar ------------------------------- */
-        item {
-            Column {
-                SectionHeader("Genel toplam")
-                Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatTile("Toplam süre", formatDurationShort(stats.totalDurationSec), Modifier.weight(1f), Icons.Default.Timer, Palette.violet)
-                    StatTile("Haftalık seri", "${stats.streakWeeks}", Modifier.weight(1f), Icons.Default.CalendarMonth, Palette.warning)
-                }
-                Spacer(Modifier.height(10.dp))
-                FitCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Bolt, null, tint = MaterialTheme.fit.gold, modifier = Modifier.size(22.dp))
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                "Bugüne kadar ${formatTonnage(stats.totalVolume)} kaldırdın",
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            Text(
-                                "Yaklaşık ${ProgressAnalytics.tonnageComparison(stats.totalVolume)} ağırlığında",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.fit.muted
-                            )
-                        }
-                    }
-                }
-            }
-        }
+private fun deltaInt(now: Int, before: Int): String? =
+    if (before <= 0 && now <= 0) null else (if (now >= before) "▲ " else "▼ ") + kotlin.math.abs(now - before)
+
+@Composable
+private fun LiftTrendRow(tag: String, color: Color, name: String, detail: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable { onClick() }.padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Badge(tag, color)
+        Spacer(Modifier.width(10.dp))
+        Text(name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(8.dp))
+        Text(detail, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.fit.muted, maxLines = 1)
     }
 }
 
@@ -779,35 +589,16 @@ private fun MusclesTab(vm: AppViewModel) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                         Spacer(Modifier.height(12.dp))
                         MuscleContributorsSection(key = key, contributors = contributors)
+                        if (load.status == LoadStatus.LOW || load.status == LoadStatus.BELOW) {
+                            Spacer(Modifier.height(12.dp))
+                            AccentButton(
+                                text = "Akıllı öneriler",
+                                onClick = { showWeakLinkAdvisor = true },
+                                icon = Icons.Default.AutoAwesome,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
-                }
-            }
-        }
-
-        /* ------------------------------ Zayıf halkalar --------------------------- */
-        item {
-            Column {
-                SectionHeader("Zayıf halkalar & Akıllı Öneriler", "Önerilen aralığın altında kalan kaslar için çözüm")
-                Spacer(Modifier.height(12.dp))
-                FitCard {
-                    if (weakLinks.isNotEmpty()) {
-                        MuscleChipRow(
-                            entries = weakLinks.take(9).map { it.key to Palette.muscle(MuscleMap.parentGroup(it.key)) },
-                            selected = selected,
-                            onClick = { selected = it }
-                        )
-                        Spacer(Modifier.height(10.dp))
-                    }
-                    InfoNote(
-                        "Dambıl, barbell ve vücut ağırlığı odaklı akıllı önerilerle zayıf halkalarını geliştirebilir veya yoğun günlerdeki gereksiz hareketleri otomatik değiştirebilirsin."
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    AccentButton(
-                        text = "Akıllı Program Analizi & Önerileri Gör",
-                        onClick = { showWeakLinkAdvisor = true },
-                        icon = Icons.Default.AutoAwesome,
-                        modifier = Modifier.fillMaxWidth()
-                    )
                 }
             }
         }
@@ -836,10 +627,14 @@ private fun MusclesTab(vm: AppViewModel) {
 
         /* ---------------------------- Tüm kas dökümü ---------------------------- */
         item {
-            SectionHeader("Kas bazlı hacim", if (scope == 0) "Bu haftanın etkin set sayısı" else "Son 4 haftanın haftalık ortalaması")
+            SectionHeader("Tüm kaslar", if (scope == 0) "Bu haftanın etkin setleri · en eksikten başlayarak" else "4 haftalık ortalama · en eksikten başlayarak")
         }
 
-        items(loads.filter { it.effectiveSets > 0f || it.target.last > 0 }, key = { it.key }) { load ->
+        items(
+            loads.filter { it.effectiveSets > 0f || it.target.last > 0 }
+                .sortedBy { if (it.target.first <= 0) 99f else it.effectiveSets / it.target.first },
+            key = { it.key }
+        ) { load ->
             val isSelected = selected == load.key
             FitCard(
                 onClick = { selected = if (isSelected) null else load.key },
@@ -892,48 +687,6 @@ private fun MusclesTab(vm: AppViewModel) {
             }
         }
 
-        /* ------------------------------- Toparlanma ------------------------------ */
-        item {
-            Column {
-                SectionHeader("Toparlanma durumu", "Kasın son çalıştırılmasından bu yana geçen süre")
-                Spacer(Modifier.height(12.dp))
-                FitCard {
-                    val trained = loads.filter { it.daysSince >= 0 }.sortedBy { it.daysSince }
-                    if (trained.isEmpty()) {
-                        Text("Henüz veri yok", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.fit.muted)
-                    } else {
-                        trained.forEach { load ->
-                            val need = MuscleMap.recoveryDays(load.key)
-                            val fresh = load.daysSince >= need
-                            Row(
-                                Modifier.fillMaxWidth().padding(vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    if (fresh) Icons.Default.CheckCircle else Icons.Default.Timer,
-                                    null,
-                                    tint = if (fresh) MaterialTheme.fit.success else MaterialTheme.fit.warning,
-                                    modifier = Modifier.size(15.dp)
-                                )
-                                Spacer(Modifier.width(9.dp))
-                                Text(
-                                    MuscleMap.label(load.key),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Text(
-                                    if (fresh) "hazır" else "${need - load.daysSince} gün daha",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = if (fresh) MaterialTheme.fit.success else MaterialTheme.fit.warning
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        InfoNote("Toparlanma süreleri kaba tahmindir; büyük kas grupları 48–72 saat, küçükler 24–48 saat.")
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -1004,6 +757,9 @@ private fun StrengthTab(vm: AppViewModel, nav: NavHostController) {
                 }
             }
         } else {
+            if (balance.isNotEmpty()) {
+                item { LiftBalanceCard(balance) }
+            }
             item {
                 Column {
                     SectionHeader("Güç seviyesi", "Vücut ağırlığı: ${bodyWeight.trimNum()} kg")
@@ -1038,44 +794,6 @@ private fun StrengthTab(vm: AppViewModel, nav: NavHostController) {
                 }
             }
 
-            if (balance.isNotEmpty()) {
-                item {
-                    Column {
-                        SectionHeader("Lift dengesi", "Squat'a göre beklenen oranlarla karşılaştırma")
-                        Spacer(Modifier.height(12.dp))
-                        FitCard {
-                            balance.forEach { item ->
-                                val strong = item.deviationPct >= 0f
-                                Row(
-                                    Modifier.fillMaxWidth().padding(vertical = 7.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(item.displayName, style = MaterialTheme.typography.titleSmall)
-                                        Text(
-                                            "Oran ${item.actualRatio.trimNum()} · beklenen ${item.expectedRatio.trimNum()}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.fit.muted
-                                        )
-                                    }
-                                    Badge(
-                                        (if (strong) "+" else "") + "%${item.deviationPct.roundToInt()}",
-                                        if (abs(item.deviationPct) < 12f) MaterialTheme.fit.success
-                                        else if (strong) MaterialTheme.fit.accent else MaterialTheme.fit.warning
-                                    )
-                                }
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            val weakest = balance.minByOrNull { it.deviationPct }
-                            InfoNote(
-                                if (weakest != null && weakest.deviationPct < -12f)
-                                    "En zayıf halkan ${weakest.displayName}. Bu hareketi seansın başına almak veya haftada bir kez daha çalışmak dengeyi düzeltir."
-                                else "Liftlerin birbirine göre dengeli görünüyor."
-                            )
-                        }
-                    }
-                }
-            }
         }
 
         /* --------------------------- 1RM gelişim grafiği ------------------------- */
@@ -1208,6 +926,74 @@ private fun LiftStandardCard(lift: LiftStandard, nav: NavHostController) {
                 color = MaterialTheme.fit.muted
             )
         }
+        item {
+            Text(
+                "Tüm rekorlar →",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.fit.accent,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().clickable { vm.setStatsTab(3) }.padding(vertical = 8.dp)
+            )
+        }
+    }
+}
+
+/** Squat'a göre lift oranları: çubuk gerçek oran, beyaz çizgi beklenen oran. */
+@Composable
+private fun LiftBalanceCard(balance: List<com.example.core.LiftBalanceItem>) {
+    FitCard {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Lift dengesi", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Text("squat = 1.00", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.fit.muted)
+        }
+        Text(
+            "Çubuk: gerçek oran · çizgi: beklenen oran",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.fit.muted
+        )
+        Spacer(Modifier.height(10.dp))
+        val scale = maxOf(1.3f, balance.maxOf { maxOf(it.actualRatio, it.expectedRatio) } * 1.1f)
+        balance.forEach { item ->
+            val ok = abs(item.deviationPct) < 12f
+            val c = if (ok) MaterialTheme.fit.success else if (item.deviationPct > 0f) MaterialTheme.fit.accent else MaterialTheme.fit.warning
+            Column(Modifier.padding(vertical = 6.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(item.displayName, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        "${item.actualRatio.trimNum()} / ${item.expectedRatio.trimNum()}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.fit.muted
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        (if (item.deviationPct >= 0f) "+" else "−") + "%" + abs(item.deviationPct).roundToInt(),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = c
+                    )
+                }
+                Spacer(Modifier.height(5.dp))
+                androidx.compose.foundation.layout.BoxWithConstraints(
+                    Modifier.fillMaxWidth().height(12.dp)
+                ) {
+                    val w = maxWidth
+                    Box(Modifier.fillMaxWidth().height(8.dp).align(Alignment.CenterStart).clip(RoundedCornerShape(4.dp)).background(MaterialTheme.fit.elevated))
+                    Box(
+                        Modifier.width(w * (item.actualRatio / scale).coerceIn(0f, 1f)).height(8.dp)
+                            .align(Alignment.CenterStart).clip(RoundedCornerShape(4.dp)).background(c)
+                    )
+                    Box(
+                        Modifier.padding(start = w * (item.expectedRatio / scale).coerceIn(0f, 1f)).width(2.dp).fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.onSurface)
+                    )
+                }
+            }
+        }
+        val weakest = balance.minByOrNull { it.deviationPct }
+        Spacer(Modifier.height(6.dp))
+        InfoNote(
+            (if (weakest != null && weakest.deviationPct < -12f) "En çok geride kalan: ${weakest.displayName}. " else "Liftlerin birbirine göre dengeli görünüyor. ") +
+                "Dambıl hareketleri tahmini barbell karşılığına çevrilerek karşılaştırılır."
+        )
     }
 }
 

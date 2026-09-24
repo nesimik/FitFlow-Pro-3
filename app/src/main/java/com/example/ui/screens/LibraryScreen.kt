@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import kotlin.math.roundToInt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -86,39 +87,71 @@ import com.example.ui.theme.fit
 @Composable
 fun LibraryScreen(vm: AppViewModel, nav: NavHostController) {
     val all by vm.exercises.collectAsStateWithLifecycle()
-    val bestLifts by vm.bestLifts.collectAsStateWithLifecycle()
+    val allSets by vm.allSets.collectAsStateWithLifecycle()
+    val days by vm.routineDays.collectAsStateWithLifecycle()
+    val allItems by vm.allItems.collectAsStateWithLifecycle()
 
     var query by remember { mutableStateOf("") }
     var group by remember { mutableStateOf("Hepsi") }
     var onlyFavorites by remember { mutableStateOf(false) }
     var showCreate by remember { mutableStateOf(false) }
 
-    val filtered = remember(all, query, group, onlyFavorites) {
-        all.asSequence()
+    val programIds = remember(days, allItems) {
+        val ids = days.map { it.id }.toSet()
+        allItems.filter { it.dayId in ids }.map { it.exerciseId }.toSet()
+    }
+    var onlyProgram by remember(programIds.isNotEmpty()) { mutableStateOf(programIds.isNotEmpty()) }
+    val stats = remember(allSets) { libraryStats(allSets) }
+
+    // Arama bir kas / bölge adıysa ("kalça", "arka bacak", "pazu") o kası çalıştıran hareketler.
+    val muscleKeys = remember(query) { com.example.core.MuscleSearch.muscles(query) }
+    val searching = query.isNotBlank()
+
+    val results: List<Pair<ExerciseEntity, Float?>> = remember(all, query, group, onlyFavorites, onlyProgram, programIds, muscleKeys) {
+        val base = all.asSequence()
             .filter { group == "Hepsi" || it.muscleGroup == group }
             .filter { !onlyFavorites || it.isFavorite }
-            .filter { query.isBlank() || it.name.lowercase(TR).contains(query.lowercase(TR)) }
-            .sortedWith(compareByDescending<ExerciseEntity> { it.isFavorite }.thenBy { it.name })
+            .filter { searching || !onlyProgram || it.id in programIds }
             .toList()
+        if (muscleKeys != null) {
+            val scored = base.map { it to com.example.core.MuscleSearch.score(it.name, it.muscleGroup, it.secondaryMuscles, muscleKeys) }
+                .filter { it.second >= com.example.core.MuscleSearch.MIN_SCORE }
+                .sortedWith(compareByDescending<Pair<ExerciseEntity, Float>> { it.second }
+                    .thenByDescending { it.first.id in programIds }
+                    .thenBy { it.first.name })
+            val q = com.example.core.MuscleSearch.fold(query)
+            val byName = base.filter { e -> scored.none { it.first.id == e.id } && com.example.core.MuscleSearch.fold(e.name).contains(q) }
+            scored.map { it.first to it.second as Float? } + byName.map { it to null }
+        } else {
+            val q = com.example.core.MuscleSearch.fold(query)
+            base.filter { q.isBlank() || com.example.core.MuscleSearch.fold(it.name).contains(q) }
+                .sortedWith(compareByDescending<ExerciseEntity> { it.id in programIds }
+                    .thenByDescending { it.isFavorite }
+                    .thenBy { it.name })
+                .map { it to null }
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(
-            title = "Hareket kütüphanesi",
-            subtitle = "${all.size} hareket · ${all.count { it.isCustom }} özel",
+            title = "Hareketler",
+            subtitle = "${all.size} hareket · ${programIds.size}'i programında",
             onBack = if (nav.previousBackStackEntry != null) { { nav.popBackStack() } } else null
         ) {
             RoundIconButton(Icons.Default.Add, MaterialTheme.fit.accent, 40.dp) { showCreate = true }
         }
 
         Column(Modifier.padding(horizontal = 16.dp)) {
-            SearchField(query, { query = it }, "Hareket ara…")
+            SearchField(query, { query = it }, "Hareket veya kas ara… (ör. kalça)")
             Spacer(Modifier.height(10.dp))
             Row(
                 Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                com.example.ui.components.ChoiceChip("★ Favoriler", onlyFavorites, { onlyFavorites = !onlyFavorites }, color = MaterialTheme.fit.gold)
+                if (programIds.isNotEmpty()) {
+                    com.example.ui.components.ChoiceChip("Programımda", onlyProgram && !searching, { onlyProgram = !onlyProgram })
+                }
+                com.example.ui.components.ChoiceChip("★ Favori", onlyFavorites, { onlyFavorites = !onlyFavorites }, color = MaterialTheme.fit.gold)
                 (listOf("Hepsi") + Muscles.all).forEach {
                     com.example.ui.components.ChoiceChip(
                         it, group == it, { group = it },
@@ -130,7 +163,7 @@ fun LibraryScreen(vm: AppViewModel, nav: NavHostController) {
 
         Spacer(Modifier.height(10.dp))
 
-        if (filtered.isEmpty()) {
+        if (results.isEmpty()) {
             EmptyState(
                 Icons.Default.FitnessCenter,
                 "Hareket bulunamadı",
@@ -143,40 +176,34 @@ fun LibraryScreen(vm: AppViewModel, nav: NavHostController) {
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 110.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(filtered, key = { it.id }) { ex ->
-                    val best = bestLifts[ex.id]?.second ?: 0f
-                    FitCard(
-                        onClick = { nav.navigate("${Routes.EXERCISE}/${ex.id}") },
-                        contentPadding = PaddingValues(12.dp)
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            MuscleAvatar(ex.muscleGroup)
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(ex.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(
-                                    MuscleMap.summary(ex.name, ex.muscleGroup) +
-                                        " · ${ex.equipment}" + if (ex.isCustom) " · özel" else "",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.fit.muted,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            if (best > 0f) {
-                                Badge("1RM ${best.trimNum()}", MaterialTheme.fit.gold)
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Icon(
-                                if (ex.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
-                                null,
-                                tint = if (ex.isFavorite) MaterialTheme.fit.gold else MaterialTheme.fit.muted,
-                                modifier = Modifier
-                                    .size(22.dp)
-                                    .clickable { vm.toggleFavorite(ex) }
-                            )
-                        }
+                if (muscleKeys != null) {
+                    item {
+                        Text(
+                            "${com.example.core.MuscleSearch.label(muscleKeys)} için hareketler · en çok çalıştırandan başlayarak",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.fit.muted,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
                     }
+                } else if (!searching && onlyProgram) {
+                    item {
+                        Text(
+                            "PROGRAMINDAKİLER · SON EN İYİ SET",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.fit.muted,
+                            modifier = Modifier.padding(horizontal = 4.dp)
+                        )
+                    }
+                }
+                items(results, key = { it.first.id }) { (ex, score) ->
+                    ExerciseRow(
+                        ex = ex,
+                        stat = stats[ex.id],
+                        score = score,
+                        highlight = muscleKeys,
+                        onClick = { nav.navigate("${Routes.EXERCISE}/${ex.id}") },
+                        onFavorite = { vm.toggleFavorite(ex) }
+                    )
                 }
             }
         }
@@ -191,6 +218,111 @@ fun LibraryScreen(vm: AppViewModel, nav: NavHostController) {
     }
 }
 
+/** Kütüphane satırı için özet: son seansın en iyi seti ve ~8 haftalık tahmini 1RM değişimi. */
+private data class LibStat(val lastBest: String, val trendPct: Int?)
+
+private fun libraryStats(sets: List<com.example.data.WorkoutSetEntity>): Map<Long, LibStat> {
+    val now = System.currentTimeMillis()
+    val day = 86_400_000L
+    return sets.filter { it.isCompleted && !it.isWarmup && it.reps > 0 }
+        .groupBy { it.exerciseId }
+        .mapValues { (_, list) ->
+            val lastWorkout = list.maxByOrNull { it.performedAt }!!.workoutId
+            val best = list.filter { it.workoutId == lastWorkout }.maxByOrNull { Calc.e1rm(it.weightKg, it.reps) }!!
+            val recent = list.filter { it.performedAt >= now - 21 * day }.maxOfOrNull { Calc.e1rm(it.weightKg, it.reps) }
+            val old = list.filter { it.performedAt in (now - 70 * day)..(now - 42 * day) }.maxOfOrNull { Calc.e1rm(it.weightKg, it.reps) }
+            LibStat(
+                lastBest = if (best.weightKg > 0f) "${best.weightKg.trimNum()} × ${best.reps}" else "${best.reps} tekrar",
+                trendPct = if (recent != null && old != null && old > 0f) Math.round((recent - old) / old * 100f) else null
+            )
+        }
+}
+
+@Composable
+private fun ExerciseRow(
+    ex: ExerciseEntity,
+    stat: LibStat?,
+    score: Float?,
+    highlight: List<String>?,
+    onClick: () -> Unit,
+    onFavorite: () -> Unit
+) {
+    val accent = MaterialTheme.fit.accent
+    val activation = remember(ex.id, ex.name) { MuscleMap.resolve(ex.name, ex.muscleGroup, ex.secondaryMuscles) }
+    val weights = remember(activation) { activation.weights() }
+    val colors = remember(weights, accent) {
+        weights.mapValues { (_, w) -> if (w >= 0.75f) accent else accent.copy(alpha = 0.45f) }
+    }
+    // Kasların çoğu arkadaysa (sırt, arka bacak) arka görünüm gösterilir.
+    val back = remember(weights) {
+        val front = weights.filterKeys { it in MuscleMap.frontVisible && it !in MuscleMap.backVisible }.values.sum()
+        val rear = weights.filterKeys { it in MuscleMap.backVisible && it !in MuscleMap.frontVisible }.values.sum()
+        rear > front
+    }
+    FitCard(onClick = onClick, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            com.example.ui.components.BodyMuscleMap(
+                view = if (back) com.example.ui.components.BodyView.BACK else com.example.ui.components.BodyView.FRONT,
+                colors = colors,
+                modifier = Modifier.width(38.dp).height(64.dp)
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(ex.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    MuscleMap.label(activation.primary.firstOrNull() ?: "") .let { if (it.isBlank()) ex.muscleGroup else it } +
+                        " · ${ex.equipment}" + if (ex.isCustom) " · özel" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.fit.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                when {
+                    score != null -> {
+                        Text("%${(score * 100).roundToInt()}", style = MaterialTheme.typography.titleSmall, color = accent)
+                        Text(
+                            highlight?.let { com.example.core.MuscleSearch.label(it) }?.lowercase() ?: "",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.fit.muted,
+                            maxLines = 1
+                        )
+                    }
+                    stat != null -> {
+                        Text(stat.lastBest, style = MaterialTheme.typography.titleSmall)
+                        stat.trendPct?.let { t ->
+                            Text(
+                                (if (t > 0) "+" else if (t < 0) "−" else "±") + "%${kotlin.math.abs(t)} · 8 hf",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (t > 0) MaterialTheme.fit.success else MaterialTheme.fit.muted
+                            )
+                        }
+                    }
+                    else -> Text("hiç yapılmadı", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.fit.muted)
+                }
+            }
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                if (ex.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+                null,
+                tint = if (ex.isFavorite) MaterialTheme.fit.gold else MaterialTheme.fit.muted.copy(alpha = 0.6f),
+                modifier = Modifier.size(20.dp).clickable { onFavorite() }
+            )
+        }
+    }
+}
+
+@Composable
+private fun DetailKpi(label: String, value: String, caption: String?, captionColor: androidx.compose.ui.graphics.Color, modifier: Modifier) {
+    Column(modifier.clip(RoundedCornerShape(14.dp)).background(MaterialTheme.fit.elevated).padding(10.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.fit.muted, maxLines = 1)
+        Text(value, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+        if (caption != null) Text(caption, style = MaterialTheme.typography.labelSmall, color = captionColor, maxLines = 1)
+    }
+}
+
 /* =============================== Hareket detayı ============================== */
 
 @Composable
@@ -198,6 +330,9 @@ fun ExerciseDetailScreen(vm: AppViewModel, nav: NavHostController, exerciseId: L
     val exercises by vm.exercises.collectAsStateWithLifecycle()
     val allSets by vm.allSets.collectAsStateWithLifecycle()
     val bodyWeight by vm.settings.weightKg.collectAsStateWithLifecycle()
+    val days by vm.routineDays.collectAsStateWithLifecycle()
+    val allItems by vm.allItems.collectAsStateWithLifecycle()
+    val workouts by vm.workouts.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     val ex = exercises.firstOrNull { it.id == exerciseId }
@@ -226,8 +361,31 @@ fun ExerciseDetailScreen(vm: AppViewModel, nav: NavHostController, exerciseId: L
     val totalVolume = sets.sumOf { (it.weightKg * it.reps).toDouble() }.toFloat()
     val level = Calc.strengthLevel(ex.muscleGroup, Calc.strengthRatio(bestE1rm, bodyWeight))
 
+    // Programdaki yeri ve sıradaki seansın reçetesi
+    val programDay = remember(days, allItems, exerciseId) {
+        days.firstOrNull { d -> allItems.any { it.dayId == d.id && it.exerciseId == exerciseId && !it.isWarmup } }
+    }
+    val nextRx = remember(programDay, allItems, allSets, workouts) {
+        programDay?.let { d ->
+            val item = allItems.first { it.dayId == d.id && it.exerciseId == exerciseId && !it.isWarmup }
+            val name = item.customName.ifBlank { ex.name }
+            vm.planFor(d.id).firstOrNull { it.first == name }?.second
+        }
+    }
+    val bestSet = sets.maxByOrNull { Calc.e1rm(it.weightKg, it.reps) }
+    val sessionCount = sets.map { it.workoutId }.distinct().size
+    val trend = remember(allSets, exerciseId) { ProgressAnalytics.trendPct(allSets.filter { it.exerciseId == exerciseId }) }
+
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader(ex.name, "${ex.muscleGroup} · ${ex.equipment}", onBack = { nav.popBackStack() }) {
+        ScreenHeader(
+            ex.name,
+            listOfNotNull(
+                ex.equipment,
+                ex.muscleGroup,
+                programDay?.let { "Programında: " + if (it.weekday in 1..7) com.example.core.weekdayName(it.weekday) else it.name }
+            ).joinToString(" · "),
+            onBack = { nav.popBackStack() }
+        ) {
             RoundIconButton(
                 if (ex.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
                 if (ex.isFavorite) MaterialTheme.fit.gold else MaterialTheme.fit.muted,
@@ -241,17 +399,49 @@ fun ExerciseDetailScreen(vm: AppViewModel, nav: NavHostController, exerciseId: L
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 110.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            if (nextRx != null && programDay != null) {
+                item {
+                    val c = actionColor(nextRx.action)
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(c.copy(alpha = 0.10f))
+                            .padding(14.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "SIRADAKİ SEANS" + if (programDay.weekday in 1..7) " · " + com.example.core.weekdayName(programDay.weekday).uppercase() else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = c,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Badge(nextRx.action.label, c)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(nextRx.headline, style = MaterialTheme.typography.titleLarge)
+                        Text(nextRx.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.fit.muted)
+                    }
+                }
+            }
+
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    StatTile("En ağır set", if (bestWeight > 0f) bestWeight.kg() else "—", Modifier.weight(1f), Icons.Default.FitnessCenter)
-                    StatTile(
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DetailKpi(
                         "Tahmini 1RM",
                         if (bestE1rm > 0f) bestE1rm.kg() else "—",
-                        Modifier.weight(1f),
-                        Icons.Default.EmojiEvents,
-                        MaterialTheme.fit.gold,
-                        caption = if (bestE1rm > 0f) level.first else null
+                        if (trend != 0f) (if (trend > 0f) "+" else "") + "%" + trend.toInt() else level.first.takeIf { bestE1rm > 0f },
+                        if (trend > 0f) MaterialTheme.fit.success else MaterialTheme.fit.muted,
+                        Modifier.weight(1f)
                     )
+                    DetailKpi(
+                        "En iyi set",
+                        bestSet?.let { if (it.weightKg > 0f) "${it.weightKg.trimNum()}×${it.reps}" else "${it.reps}" } ?: "—",
+                        bestSet?.let { formatDateShort(it.performedAt) },
+                        MaterialTheme.fit.muted,
+                        Modifier.weight(1f)
+                    )
+                    DetailKpi("Seans", "$sessionCount", null, MaterialTheme.fit.muted, Modifier.weight(1f))
                 }
             }
 
@@ -261,11 +451,19 @@ fun ExerciseDetailScreen(vm: AppViewModel, nav: NavHostController, exerciseId: L
                 }
                 if (!activation.isEmpty) {
                     val accent = MaterialTheme.fit.accent
-                    val mapColors = remember(activation, accent) {
-                        val m = LinkedHashMap<String, androidx.compose.ui.graphics.Color>()
-                        activation.secondary.forEach { m[it] = accent.copy(alpha = 0.34f) }
-                        activation.primary.forEach { m[it] = accent }
-                        m
+                    // Katkı oranları: renk yoğunluğu oranla orantılı; göğüs hareketlerinde üst/alt ayrı.
+                    val contributions = remember(activation, ex.name) {
+                        val w = LinkedHashMap(activation.weights())
+                        w[MuscleMap.CHEST]?.let { c ->
+                            val (u, l) = MuscleMap.chestSplit(ex.name)
+                            w.remove(MuscleMap.CHEST)
+                            w[MuscleMap.CHEST_LOWER] = c * l
+                            w[MuscleMap.CHEST_UPPER] = c * u
+                        }
+                        w.entries.sortedByDescending { it.value }.map { it.key to it.value }
+                    }
+                    val mapColors = remember(contributions, accent) {
+                        contributions.associate { (k, v) -> k to accent.copy(alpha = (0.25f + 0.75f * v).coerceIn(0f, 1f)) }
                     }
                     FitCard {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -275,16 +473,13 @@ fun ExerciseDetailScreen(vm: AppViewModel, nav: NavHostController, exerciseId: L
                         Spacer(Modifier.height(10.dp))
                         BodyMuscleMapPair(colors = mapColors, height = 230.dp, showLabels = true)
                         Spacer(Modifier.height(14.dp))
-                        if (activation.primary.isNotEmpty()) {
-                            OverlineText("Birincil")
-                            Spacer(Modifier.height(6.dp))
-                            MuscleChipRow(activation.primary.map { it to accent })
-                        }
-                        if (activation.secondary.isNotEmpty()) {
-                            Spacer(Modifier.height(10.dp))
-                            OverlineText("Destek kaslar")
-                            Spacer(Modifier.height(6.dp))
-                            MuscleChipRow(activation.secondary.map { it to accent.copy(alpha = 0.6f) })
+                        Row(
+                            Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            contributions.forEach { (k, v) ->
+                                Badge("${MuscleMap.label(k)} %${(v * 100).roundToInt()}", if (v >= 0.75f) accent else MaterialTheme.fit.muted)
+                            }
                         }
                     }
                 }
@@ -359,42 +554,13 @@ fun ExerciseDetailScreen(vm: AppViewModel, nav: NavHostController, exerciseId: L
                 }
             }
 
-            if (sets.isNotEmpty()) {
-                item {
-                    FitCard {
-                        OverlineText("Genel toplam")
-                        Spacer(Modifier.height(8.dp))
-                        KeyValueRow("Toplam set", "${sets.size}")
-                        KeyValueRow("Toplam tekrar", "${sets.sumOf { it.reps }}")
-                        KeyValueRow("Toplam hacim", com.example.core.formatTonnage(totalVolume))
-                        KeyValueRow("Güç seviyesi", level.first, Palette.muscle(ex.muscleGroup))
-                        val trend = remember(allSets, exerciseId) {
-                            ProgressAnalytics.trendPct(allSets.filter { it.exerciseId == exerciseId })
-                        }
-                        if (trend != 0f) {
-                            KeyValueRow(
-                                "Son 4 seans eğilimi",
-                                (if (trend > 0f) "+" else "") + "%" + trend.toInt(),
-                                if (trend > 0f) MaterialTheme.fit.success else MaterialTheme.fit.warning
-                            )
-                        }
-                    }
-                }
-            }
-
             item {
                 val bestByRange = remember(allSets, exerciseId) {
                     ProgressAnalytics.bestSetsByRange(allSets.filter { it.exerciseId == exerciseId })
                 }
-                if (bestByRange.size >= 2) {
+                if (bestByRange.isNotEmpty()) {
                     FitCard {
-                        OverlineText("Tekrar aralığına göre en iyi setler")
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Aynı harekette hem ağır hem yüksek tekrar çalıştıysan, hangi bantta ne kadar güçlü olduğunu gösterir.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.fit.muted
-                        )
+                        OverlineText("Rekorlar · tekrar aralığına göre")
                         Spacer(Modifier.height(10.dp))
                         bestByRange.forEach { b ->
                             Row(

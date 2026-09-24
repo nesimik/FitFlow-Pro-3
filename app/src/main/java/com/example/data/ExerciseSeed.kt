@@ -526,7 +526,92 @@ object ExerciseSeed {
                 "Ön bacak yerde 90 derece kıvrık, arka bacak düz uzatılmış derin kalça esnemesi."),
             e("Boş Bar Squat", Muscles.LEGS, "Barbell", "Isınma", R, 0, ""),
             e("Boş Bar Bench", Muscles.CHEST, "Barbell", "Isınma", R, 0, ""),
-            e("Boş Bar OHP", Muscles.SHOULDERS, "Barbell", "Isınma", R, 0, "")
+            e("Boş Bar OHP", Muscles.SHOULDERS, "Barbell", "Isınma", R, 0, ""),
+
+            /* ------------------------- 2.3 ile eklenenler -------------------------
+             * Özellikle makinesiz / ayarlanabilir dambıllı salonlar için eksik kalan
+             * arka bacak, kalça, üst sırt, omuz sağlığı ve gövde hareketleri.
+             * Video bağlantısı olmayanlarda uygulama YouTube aramasına yönlendirir. */
+
+            // Arka bacak ve kalça (leg curl makinesi olmadan)
+            e("Dumbbell Leg Curl", Muscles.LEGS, "Dumbbell", "Hamstring", W, 75, "",
+                "Yüzüstü bench'e uzanılır, dambıl iki ayak arasında sıkıştırılarak dizler bükülür ve yavaşça indirilir.",
+                "Leg curl makinesi yoksa arka bacağı izole etmenin en pratik yolu. Hafif başlayın, dambılı ayaklarla sıkı tutun."),
+            e("Sliding Leg Curl", Muscles.LEGS, "Vücut Ağırlığı", "Hamstring, Kalça", R, 60, "",
+                "Sırtüstü, topuklar havlu veya kaydırak üzerinde; kalça köprü pozisyonundayken topuklar kalçaya çekilip uzatılır.",
+                "Kalçayı hareket boyunca yukarıda tutun. Zorlaşınca tek bacakla yapın."),
+            e("Stiff Leg Deadlift", Muscles.BACK, "Barbell", "Hamstring, Kalça, Bel", W, 120, "",
+                "Dizler neredeyse düz, sırt nötr; bar kalça menteşesiyle indirilir. RDL'e göre arka bacak gerginliği daha fazladır.",
+                "Esnekliğiniz izin verdiği kadar inin; sırtın yuvarlanmasına izin vermeyin."),
+            e("Single Leg Romanian Deadlift", Muscles.BACK, "Dumbbell", "Hamstring, Kalça, Denge", W, 75, "",
+                "Tek ayak üzerinde, dambıl karşı elde; gövde öne, serbest bacak geriye uzanarak kalça menteşesi yapılır.",
+                "Kalçayı yere paralel tutun, dönmesine izin vermeyin. Denge için yavaş tempo."),
+            e("Cable Pull-Through", Muscles.LEGS, "Kablo", "Kalça, Hamstring", W, 75, "",
+                "Makaraya sırtınız dönük, halat bacak arasından tutulur; kalça geriye itilip kalça sıkılarak öne gelinir.",
+                "Kolları sadece tutucu olarak kullanın; hareketi kalça yapar."),
+            e("Dumbbell Hip Thrust", Muscles.LEGS, "Dumbbell", "Kalça, Hamstring", W, 90, "",
+                "Sırt bench'e dayalı, dambıl kalça üzerinde; kalça tam ekstansiyona kaldırılıp tepede sıkılır.",
+                "Çene göğse yakın, kaburgalar aşağıda; bel ile değil kalça ile kaldırın."),
+            e("Single Leg Glute Bridge", Muscles.LEGS, "Vücut Ağırlığı", "Kalça, Hamstring", R, 45, "",
+                "Sırtüstü, tek ayak yerde; kalça yukarı kaldırılıp tepede bir saniye tutulur."),
+            e("Cable Hip Abduction", Muscles.LEGS, "Kablo", "Kalça (Gluteus Medius)", W, 60, "",
+                "Ayak bileğine bağlanan kablo ile bacak dışarıya doğru açılır.",
+                "Gövdeyi sabit tutun, bacağı yana değil hafif geriye doğru açın."),
+
+            // Ön bacak ve baldır
+            e("Heel Elevated Goblet Squat", Muscles.LEGS, "Dumbbell", "Ön Bacak, Kalça", W, 90, "",
+                "Topuklar plaka üzerinde yükseltilmiş goblet squat; ön bacağa daha fazla yük bindirir.",
+                "Dizler ayak uçlarını geçebilir; gövde dik kalsın."),
+            e("Dumbbell Split Squat", Muscles.LEGS, "Dumbbell", "Ön Bacak, Kalça", W, 90, "",
+                "Ayaklar önde-arkada sabit, dambıllar yanlarda; arka diz yere yaklaşana kadar inilir."),
+            e("Smith Machine Squat", Muscles.LEGS, "Makine", "Ön Bacak, Kalça", W, 120, "",
+                "Smith makinesinde sabit bar yolunda squat; ayak yerleşimiyle vurgu değiştirilebilir."),
+            e("Single Leg Calf Raise", Muscles.LEGS, "Dumbbell", "Baldır", W, 45, "",
+                "Tek ayak basamak kenarında, dambıl aynı taraftaki elde; tam aşağı esneyip parmak ucuna yükselinir.",
+                "Alt noktada bir saniye bekleyin; tam hareket açıklığı baldır gelişiminin anahtarıdır."),
+
+            // Sırt
+            e("Chest Supported Dumbbell Row", Muscles.BACK, "Dumbbell", "Üst Sırt, Arka Omuz, Biceps", W, 90, "",
+                "Eğimli bench'e yüzüstü yaslanılır, dambıllar kürek kemikleri sıkılarak çekilir.",
+                "Bel yükü olmadan üst sırtı çalıştırır; RDL veya squat günlerinde iyi bir seçenek."),
+            e("Single Arm Lat Pulldown", Muscles.BACK, "Kablo", "Kanat, Biceps", W, 75, "",
+                "Tek kolla kablo yukarıdan kalçaya doğru, dirsek yan-aşağı çekilir.",
+                "Omzu kulaktan uzak tutun; tam esnemeyle başlayın."),
+
+            // Omuz (sağlık ve arka / yan omuz)
+            e("Dumbbell External Rotation", Muscles.SHOULDERS, "Dumbbell", "Rotator Manşet", W, 45, "",
+                "Yan yatarak, dirsek gövdeye yapışık ve 90 derece; hafif dambıl ön kol dışa dönerek kaldırılır.",
+                "Omuz sağlığı için; çok hafif ağırlık ve yavaş tempo. Isınmada da kullanılabilir."),
+            e("Cable External Rotation", Muscles.SHOULDERS, "Kablo", "Rotator Manşet", W, 45, "",
+                "Dirsek gövdede 90 derece, kablo karşı taraftan dışa doğru döndürülür."),
+            e("Incline Y Raise", Muscles.SHOULDERS, "Dumbbell", "Arka Omuz, Alt Trapez", W, 60, "",
+                "Eğimli bench'e yüzüstü, hafif dambıllar başparmaklar yukarıda Y şeklinde kaldırılır.",
+                "Omzu kulağa çekmeyin; hareket kürek kemiğinden başlar."),
+            e("Landmine Press", Muscles.SHOULDERS, "Barbell", "Ön Omuz, Üst Göğüs, Triceps", W, 90, "",
+                "Barın bir ucu sabit, diğer ucu omuz hizasından çapraz yukarıya itilir.",
+                "Baş üstü presin omuz dostu alternatifi."),
+            e("Seated Dumbbell Lateral Raise", Muscles.SHOULDERS, "Dumbbell", "Yan Omuz", W, 60, "",
+                "Oturarak yapılan yana açış; gövde salınımını ortadan kaldırır."),
+
+            // Kol
+            e("Bayesian Cable Curl", Muscles.ARMS, "Kablo", "Biceps", W, 60, "",
+                "Makaraya sırt dönük, kol geride; kablo öne doğru bükülerek biceps uzamış pozisyonda çalıştırılır."),
+            e("Zottman Curl", Muscles.ARMS, "Dumbbell", "Biceps, Ön Kol", W, 60, "",
+                "Avuç yukarı bakarak kaldırılır, tepede avuç aşağı çevrilip yavaşça indirilir."),
+
+            // Gövde
+            e("Suitcase Carry", Muscles.CORE, "Dumbbell", "Yan Karın, Ön Kol, Trapez", D, 60, "",
+                "Tek elde ağır dambılla dik yürünür; gövde yana eğilmemelidir.",
+                "Yan karın ve kavrama için etkili; mesafe veya süreyle ilerleyin."),
+            e("Reverse Crunch", Muscles.CORE, "Vücut Ağırlığı", "Alt Karın", R, 45, "",
+                "Sırtüstü, dizler bükülü; kalça yerden kaldırılarak dizler göğse çekilir."),
+            e("Copenhagen Plank", Muscles.CORE, "Vücut Ağırlığı", "İç Bacak, Yan Karın", D, 45, "",
+                "Yan plank pozisyonunda üstteki bacak bench'e dayanır; alttaki bacak havada tutulur.",
+                "Başlangıçta dizden destekli yapın."),
+
+            // Kardiyo
+            e("Eliptik Bisiklet", Muscles.CARDIO, "Makine", "Bacak, Kardiyo", D, 0, "",
+                "Eklemlere düşük darbeli kardiyo.")
         )
     }
 }

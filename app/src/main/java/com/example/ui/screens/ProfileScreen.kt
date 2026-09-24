@@ -111,7 +111,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
     ) {
         item {
             ScreenHeader(
-                title = "Profil",
+                title = "Profil ve ayarlar",
                 onBack = if (nav.previousBackStackEntry != null) { { nav.popBackStack() } } else null
             )
         }
@@ -173,7 +173,7 @@ fun ProfileScreen(vm: AppViewModel, nav: NavHostController) {
                     NavRow("Vücut ölçümleri", "Kilo ve çevre ölçümü takibi", Icons.Default.MonitorWeight) { nav.navigate(Routes.BODY) }
                     NavRow("Antrenman geçmişi", "${stats.totalWorkouts} kayıt", Icons.Default.History) { nav.navigate(Routes.HISTORY) }
                     NavRow("Notlar", "Antrenman günlüğü ve fikirler", Icons.Default.EditNote) { nav.navigate(Routes.NOTES) }
-                    NavRow("Hesaplayıcılar", "1RM, plaka, ısınma, VKİ, kalori", Icons.Default.Calculate) { nav.navigate(Routes.TOOLS) }
+                    NavRow("Hesaplayıcılar", "1RM, plaka, ısınma ve diğerleri", Icons.Default.Calculate) { nav.navigate(Routes.TOOLS) }
                     NavRow("Ayarlar", "Tema, dinlenme, ses, güvenlik", Icons.Default.Settings) { nav.navigate(Routes.SETTINGS) }
                 }
             }

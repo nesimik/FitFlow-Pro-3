@@ -446,16 +446,35 @@ object ProgressAnalytics {
         val display: String,
         val matches: List<String>,
         val thresholds: List<Float>,
-        val upperBody: Boolean
+        val upperBody: Boolean,
+        /** Adında bunlardan biri geçen hareketler bu lifte sayılmaz. */
+        val excludes: List<String> = emptyList(),
+        /**
+         * Dambıl varyasyonu: tek dambılın tahmini 1RM'i × 2 × bu çarpan ≈ barbell karşılığı.
+         * 0 = dambıl varyasyonu kabul edilmez. (İki dambıl, dengeleme ihtiyacı yüzünden
+         * genelde barbell'den biraz daha az kaldırılır; çarpan bu farkı yaklaşık düzeltir.)
+         */
+        val dumbbellFactor: Float = 0f
     )
 
     private val liftDefs = listOf(
-        LiftDef("squat", "Squat", listOf("barbell squat", "squat"), listOf(0.75f, 1.1f, 1.45f, 1.9f, 2.4f), false),
-        LiftDef("bench", "Bench Press", listOf("bench press"), listOf(0.5f, 0.75f, 1.0f, 1.35f, 1.75f), true),
-        LiftDef("deadlift", "Deadlift", listOf("deadlift"), listOf(1.0f, 1.35f, 1.75f, 2.2f, 2.75f), false),
-        LiftDef("ohp", "Overhead Press", listOf("overhead press", "push press", "shoulder press"), listOf(0.35f, 0.5f, 0.7f, 0.9f, 1.15f), true),
-        LiftDef("row", "Barbell Row", listOf("barbell row", "pendlay row"), listOf(0.5f, 0.75f, 1.0f, 1.3f, 1.6f), true)
+        LiftDef("squat", "Squat", listOf("barbell squat", "squat"), listOf(0.75f, 1.1f, 1.45f, 1.9f, 2.4f), false,
+            excludes = listOf("goblet", "split", "pistol", "sissy", "bodyweight", "wall sit", "cossack")),
+        LiftDef("bench", "Bench Press", listOf("bench press"), listOf(0.5f, 0.75f, 1.0f, 1.35f, 1.75f), true,
+            excludes = listOf("close grip", "incline", "decline"), dumbbellFactor = 0.85f),
+        LiftDef("deadlift", "Deadlift", listOf("deadlift"), listOf(1.0f, 1.35f, 1.75f, 2.2f, 2.75f), false,
+            excludes = listOf("romanian", "rdl", "stiff", "single leg")),
+        // RDL klasik deadlift'ten doğası gereği hafiftir: kendi eşik ve beklenen oranıyla değerlendirilir.
+        LiftDef("rdl", "Romanian Deadlift", listOf("romanian", "rdl"), listOf(0.8f, 1.1f, 1.4f, 1.8f, 2.2f), false,
+            dumbbellFactor = 0.9f),
+        LiftDef("ohp", "Overhead Press", listOf("overhead press", "push press", "shoulder press"), listOf(0.35f, 0.5f, 0.7f, 0.9f, 1.15f), true,
+            excludes = listOf("machine", "makine", "smith"), dumbbellFactor = 0.85f),
+        // Tek kol dambıl row'da gövde desteği daha fazla yük taşıtır; çarpan buna göre düşük tutuldu.
+        LiftDef("row", "Row", listOf("barbell row", "pendlay row", "dumbbell row"), listOf(0.5f, 0.75f, 1.0f, 1.3f, 1.6f), true,
+            dumbbellFactor = 0.75f)
     )
+
+    private fun isDumbbell(n: String) = n.contains("dumbbell") || n.contains("dambıl") || n.contains("db ")
 
     private val levelNames = listOf("Başlangıç", "Acemi", "Orta", "İleri", "Çok İleri", "Elit")
 
@@ -473,15 +492,25 @@ object ProgressAnalytics {
         if (valid.isEmpty()) return emptyList()
 
         return liftDefs.mapNotNull { def ->
+            // Türkçe küçük harf "I" → "ı" yapar; Latin karşılaştırma için ı → i.
+            fun norm(x: String) = x.lowercase(TR).replace('ı', 'i')
             val candidates = valid.filter { s ->
-                val n = s.exerciseName.lowercase(TR)
+                val n = norm(s.exerciseName)
                 def.matches.any { n.contains(it) } &&
-                    !n.contains("dumbbell") && !n.contains("goblet") && !n.contains("boş bar")
+                    def.excludes.none { n.contains(it) } &&
+                    !n.contains("goblet") && !n.contains("boş bar") &&
+                    (!isDumbbell(n) || def.dumbbellFactor > 0f)
             }
             if (candidates.isEmpty()) return@mapNotNull null
-            val best = candidates.maxByOrNull { Calc.e1rm(it.weightKg, it.reps) } ?: return@mapNotNull null
-            val e1rm = Calc.e1rm(best.weightKg, best.reps)
+            // Dambıl setleri tahmini barbell karşılığına çevrilir.
+            fun equiv(s: WorkoutSetEntity): Float {
+                val raw = Calc.e1rm(s.weightKg, s.reps)
+                return if (isDumbbell(norm(s.exerciseName))) raw * 2f * def.dumbbellFactor else raw
+            }
+            val best = candidates.maxByOrNull { equiv(it) } ?: return@mapNotNull null
+            val e1rm = equiv(best)
             if (e1rm <= 0f) return@mapNotNull null
+            val fromDumbbell = isDumbbell(norm(best.exerciseName))
 
             val genderFactor = if (isMale) 1f else if (def.upperBody) 0.68f else 0.78f
             val thresholds = def.thresholds.map { it * genderFactor }
@@ -493,7 +522,7 @@ object ProgressAnalytics {
 
             LiftStandard(
                 liftKey = def.key,
-                displayName = def.display,
+                displayName = if (fromDumbbell) best.exerciseName else def.display,
                 exerciseId = best.exerciseId,
                 e1rm = e1rm,
                 bodyweightRatio = ratio,
@@ -512,6 +541,7 @@ object ProgressAnalytics {
         val expected = mapOf(
             "bench" to 0.75f,
             "deadlift" to 1.2f,
+            "rdl" to 0.95f,
             "ohp" to 0.45f,
             "row" to 0.6f
         )

@@ -148,8 +148,8 @@ private val navItems = listOf(
     NavItem(Routes.HOME, "Bugün", Icons.Outlined.Home),
     NavItem(Routes.ROUTINES, "Program", Icons.Outlined.CalendarMonth),
     NavItem(Routes.STATS, "İlerleme", Icons.Outlined.BarChart),
-    NavItem(Routes.LIBRARY, "Hareket", Icons.Outlined.FitnessCenter),
-    NavItem(Routes.PROFILE, "Profil", Icons.Outlined.Person)
+    NavItem(Routes.LIBRARY, "Hareket", Icons.Outlined.FitnessCenter)
+    // Profil ve ayarlar alt menüden çıktı: ana ekrandaki ⚙ ikonundan açılır.
 )
 
 @Composable
@@ -195,7 +195,8 @@ private fun AppScaffold(vm: AppViewModel) {
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = showBars || drawerState.isOpen,
+        // Yan menü (drawer) devre dışı: her ekrana alt menü ve ⚙ üzerinden ulaşılıyor.
+        gesturesEnabled = drawerState.isOpen,
         drawerContent = {
             AppDrawer(
                 vm = vm,
@@ -211,7 +212,7 @@ private fun AppScaffold(vm: AppViewModel) {
             )
         }
     ) {
-        CompositionLocalProvider(LocalMenuAction provides (if (showBars) openDrawer else null)) {
+        CompositionLocalProvider(LocalMenuAction provides null) {
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
                 bottomBar = {
